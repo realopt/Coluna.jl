@@ -195,16 +195,26 @@ function insert_cuts_in_master!(
     for dual_sol_id in sp_dualsol_ids
         nb_of_gen_cuts += 1
         name = string("BC_", getsortuid(dual_sol_id))
-        kind = MathProg.Core
-        duty = MasterBendCutConstr
-        bc = setcut_from_sp_dualsol!(
-            masterform,
-            spform,
-            dual_sol_id,
-            name,
-            duty;
-            kind = kind,
-            sense = sense
+
+        ## TODO : provide methods
+        members = VarMembership()
+        sp_sol = getdualsolmatrix(spform)[:,dual_sol_id]
+
+        for (sp_constr_id, sp_constr_val) in sp_sol
+            for (master_var_id, sp_var_coeff) in getcoefmatrix(spform)[sp_constr_id, :]
+                if getduty(master_var_id) <= AbstractBendSpSlackMastVar
+                    val = get(members, master_var_id, 0.0)
+                    members[master_var_id] = val + sp_constr_val * sp_var_coeff
+                end
+            end
+        end
+        # end TODO
+
+        bc = setconstr!(
+            masterform, name, MasterBendCutConstr,
+            rhs = getdualsolrhss(spform)[dual_sol_id], 
+            sense = sense,
+            members = members
         )
         
         @logmsg LogLevel(-2) string("Generated cut : ", name)

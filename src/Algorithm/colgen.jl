@@ -116,14 +116,25 @@ function insert_cols_in_master!(
     for sol_id in sp_solution_ids
         nb_of_gen_col += 1
         name = string("MC_", getsortuid(sol_id)) 
-        lb = 0.0
-        ub = Inf
-        kind = Continuous
-        duty = MasterCol
-        sense = Positive
-        mc = setcol_from_sp_primalsol!(
-            masterform, spform, sol_id, name, duty; lb = lb, ub = ub, 
-            kind = kind, sense = sense
+
+        ## TODO : provide methods or operator to do this in one line
+        master_coef_matrix = getcoefmatrix(masterform)
+        sp_sol = getprimalsolmatrix(spform)[:,sol_id]
+        members = ConstrMembership()
+    
+        for (sp_var_id, sp_var_val) in sp_sol
+            for (master_constrid, sp_var_coef) in master_coef_matrix[:,sp_var_id]
+                val = get(members, master_constrid, 0.0)
+                members[master_constrid] = val + sp_var_val * sp_var_coef
+            end
+        end
+        ## end TODO
+        
+        mc = setvar!(
+            masterform, name, MasterCol,
+            cost = getprimalsolcosts(spform)[sol_id],
+            members = members,
+            id = sol_id
         )
         @logmsg LogLevel(-2) string("Generated column : ", name)
     end
