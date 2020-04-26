@@ -188,6 +188,15 @@ function retrieve_result(form::Formulation, optimizer::MoiOptimizer)
     return result
 end
 
+function setwarmstart!(form::Formulation, optimizer::MoiOptimizer, sol::PrimalSolution)
+    for (varid, val) in sol
+        moirec = getmoirecord(getvar(form, varid))
+        moi_index = getindex(moirec)
+        MOI.set(optimizer.inner, MOI.VariablePrimalStart(), moi_index, val)
+    end
+    return
+end
+
 function optimize!(form::Formulation, optimizer::MoiOptimizer)
     @logmsg LogLevel(-4) "MOI formulation before synch: "
     @logmsg LogLevel(-4) getoptimizer(form)

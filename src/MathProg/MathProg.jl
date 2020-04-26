@@ -72,7 +72,7 @@ export no_optimizer_builder, set_original_formulation!,
        contains, setprimalbound!
 
 # Below this line, clean up has been done :
-export reformulate!, optimize!
+export reformulate!, optimize!, setwarmstart!
 
 # Methods related to Problem
 export Problem, set_initial_dual_bound!, set_initial_primal_bound!,
