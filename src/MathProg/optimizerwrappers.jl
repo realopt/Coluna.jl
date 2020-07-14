@@ -189,6 +189,31 @@ function retrieve_result(form::Formulation, optimizer::MoiOptimizer)
     return result
 end
 
+_supports_basis(form::Formulation, optimizer) = false
+_supports_basis(form::Formulation, optimizer::MoiOptimizer) = MOI.supports(optimizer.inner, MOI.ConstraintBasisStatus())
+optimizer_supports_basis(form::Formulation) = _supports_basis(form, getoptimizer(form))
+
+# TODO data structure to handle the basis
+function getbasis!(form::Formulation)
+    inner = getoptimizer(form).inner
+    for (id, constr) in getconstrs(form)
+        iscuractive(form, constr) && iscurexplicit(form, constr) || continue
+        moi_index = getindex(getmoirecord(constr))
+        basis_status = MOI.get(inner, MOI.ConstraintBasisStatus(moi_index))
+    end
+    for (id, var) in getvars(form)
+        iscuractive(form, var) && iscurexplicit(form, var) || continue
+        moi_bounds_index = getbounds(getmoirecord(var))
+        basis_status = MOI.get(inner, MOI.ConstraintBasisStatus(moi_bounds_index))
+    end
+    return
+end
+
+function setbasis!(form::Formulation)
+    # TODO
+    # MOI.set( )
+end
+
 function optimize!(form::Formulation, optimizer::MoiOptimizer)
     @logmsg LogLevel(-4) "MOI formulation before synch: "
     @logmsg LogLevel(-4) getoptimizer(form)
