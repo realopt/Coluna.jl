@@ -39,7 +39,7 @@ struct PricingCallbackData
     primal_solutions::Vector{PrimalSolution}
 end
 
-function PricingCallbackData(form::F) where {F<:Formulation} 
+function PricingCallbackData(form::F) where {F<:Formulation}
     return PricingCallbackData(form, PrimalSolution{F}[])
 end
 
@@ -56,7 +56,7 @@ end
 getinner(optimizer::MoiOptimizer) = optimizer.inner
 
 function sync_solver!(optimizer::MoiOptimizer, f::Formulation)
-    @logmsg LogLevel(-1) string("Synching formulation ", getuid(f))
+    #@logmsg LogLevel(-1) string("Synching formulation ", getuid(f))
     buffer = f.buffer
     matrix = getcoefmatrix(f)
 
@@ -148,4 +148,3 @@ function _initialize_optimizer!(optimizer::MoiOptimizer, form::Formulation)
 end
 
 _initialize_optimizer!(optimizer, form::Formulation) = return
-
