@@ -18,3 +18,8 @@ get_benders_sep_sps
 get_dw_pricing_sp_ub_constrid
 get_dw_pricing_sp_lb_constrid
 ```
+
+```@meta
+CurrentModule = nothing
+DocTestSetup = nothing
+```

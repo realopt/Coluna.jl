@@ -1,19 +1,3 @@
-
-# """
-#     AbstractRelaxationImprovement
-
-#     Relaxation imporovement is an algorithm to strengethen the current relaxation of the problem
-#     Usual types of such algorithms are finding branching candidates and cut separation
-#     However, other types are possible, for example, increasing ng-neighbourhood in the ng-path relaxation
-#     Each relaxation improvement should have a root and non-root priority
-# """
-# abstract type AbstractRelaxationImprovement end
-
-# getrootpriority(improvement::AbstractRelaxationImprovement) = 1.0
-# getnonrootpriority(improvement::AbstractRelaxationImprovement) = 1.0
-# getpriority(improvement::AbstractRelaxationImprovement, rootnode::Bool) = 
-#     rootnode ? getrootpriority(improvement) : getnonrootpriority(improvement) 
-
 """
     SelectionCriterion
 """

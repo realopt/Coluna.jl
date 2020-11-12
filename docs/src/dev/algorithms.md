@@ -20,3 +20,8 @@ ColumnGeneration
 SolveIpForm
 SolveLpForm
 ```
+
+```@meta
+CurrentModule = nothing
+DocTestSetup = nothing
+```

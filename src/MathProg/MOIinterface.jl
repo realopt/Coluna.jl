@@ -109,11 +109,6 @@ function enforce_kind_in_optimizer!(form::Formulation, v::Variable)
     return
 end
 
-function enforce_kind_in_optimizer!(form::Formulation, c::Constraint)
-    # to do : issue #266
-    return
-end
-
 function add_to_optimizer!(form::Formulation, var::Variable)
     optimizer = getoptimizer(form)
     inner = getinner(optimizer)
@@ -182,66 +177,6 @@ function _getcolunakind(record::MoiVarRecord)
     return Integ
 end
 
-function fill_primal_result!(form::Formulation, optimizer::MoiOptimizer, 
-                             result::MoiResult{<:Formulation,S},
-                             ) where {S<:Coluna.AbstractSense}
-    inner = getinner(optimizer)
-    for res_idx in 1:MOI.get(inner, MOI.ResultCount())
-        if MOI.get(inner, MOI.PrimalStatus(res_idx)) != MOI.FEASIBLE_POINT
-            continue
-        end
-        solcost = MOI.get(inner, MOI.ObjectiveValue())
-        solvars = Vector{VarId}()
-        solvals = Vector{Float64}()
-        for (id, var) in getvars(form)
-            iscuractive(form, id) && isexplicit(form, id) || continue
-            moirec = getmoirecord(var)
-            moi_index = getindex(moirec)
-            kind = _getcolunakind(moirec)
-            val = MOI.get(inner, MOI.VariablePrimal(res_idx), moi_index)
-            val = round(val, digits = Coluna._params_.tol_digits)
-            if abs(val) > Coluna._params_.tol
-                @logmsg LogLevel(-4) string("Var ", var.name , " = ", val)
-                push!(solvars, id)
-                push!(solvals, val)
-            end
-        end
-        add_primal_sol!(result, PrimalSolution(form, solvars, solvals, solcost))
-    end
-    @logmsg LogLevel(-2) string("Primal bound is ", getprimalbound(result))
-    return
-end
-
-function fill_dual_result!(form::Formulation, optimizer::MoiOptimizer,
-                           result::MoiResult{<:Formulation,S}
-                           ) where {S<:Coluna.AbstractSense}
-    inner = getinner(optimizer)
-    for res_idx in 1:MOI.get(inner, MOI.ResultCount())
-        if MOI.get(inner, MOI.DualStatus(res_idx)) != MOI.FEASIBLE_POINT
-            continue
-        end
-        solcost = MOI.get(inner, MOI.ObjectiveValue())
-        solconstrs = Vector{ConstrId}()
-        solvals = Vector{Float64}()
-        # Getting dual bound is not stable in some solvers. 
-        # Getting primal bound instead, which will work for lps
-        for (id, constr) in getconstrs(form)
-            iscuractive(form, id) && isexplicit(form, id) || continue
-            moi_index = getindex(getmoirecord(constr))
-            val = MOI.get(inner, MOI.ConstraintDual(res_idx), moi_index)
-            val = round(val, digits = Coluna._params_.tol_digits)
-            if abs(val) > Coluna._params_.tol
-                @logmsg LogLevel(-4) string("Constr ", constr.name, " = ", val)
-                push!(solconstrs, id)
-                push!(solvals, val)      
-            end
-        end
-        add_dual_sol!(result, DualSolution(form, solconstrs, solvals, solcost))
-    end
-    @logmsg LogLevel(-2) string("Dual bound is ", getdualbound(result))
-    return
-end
-
 function _getreducedcost(form::Formulation, optimizer, var::Variable)
     varname = getname(form, var)
     opt = typeof(optimizer)
@@ -276,6 +211,80 @@ function _getreducedcost(form::Formulation, optimizer::MoiOptimizer, var::Variab
 end
 getreducedcost(form::Formulation, var::Variable) = _getreducedcost(form, getoptimizer(form), var)
 getreducedcost(form::Formulation, varid::VarId) = _getreducedcost(form, getoptimizer(form), getvar(form, varid))
+
+function get_primal_solutions(form::F, optimizer::MoiOptimizer) where {F <: Formulation}
+    inner = getinner(optimizer)
+    nb_primal_sols = MOI.get(inner, MOI.ResultCount())
+    solutions = PrimalSolution{F}[]
+    for res_idx in 1:nb_primal_sols
+        if MOI.get(inner, MOI.PrimalStatus(res_idx)) != MOI.FEASIBLE_POINT
+            continue
+        end
+        solcost = 0.0 # TODO : constant in the objective function ?
+        solvars = Vector{VarId}()
+        solvals = Vector{Float64}()
+        for (id, var) in getvars(form)
+            iscuractive(form, id) && isexplicit(form, id) || continue
+            moirec = getmoirecord(var)
+            moi_index = getindex(moirec)
+            kind = _getcolunakind(moirec)
+            val = MOI.get(inner, MOI.VariablePrimal(res_idx), moi_index)
+            solcost += val * getcurcost(form, id)
+            val = round(val, digits = Coluna._params_.tol_digits)
+            if abs(val) > Coluna._params_.tol
+                @logmsg LogLevel(-4) string("Var ", var.name , " = ", val)
+                push!(solvars, id)
+                push!(solvals, val)
+            end
+        end
+        push!(solutions, PrimalSolution(form, solvars, solvals, solcost, FEASIBLE_SOL))
+    end
+    return solutions
+end
+
+function get_dual_solutions(form::F, optimizer::MoiOptimizer) where {F <: Formulation}
+    inner = getinner(optimizer)
+    nb_dual_sols = MOI.get(inner, MOI.ResultCount())
+    solutions = DualSolution{F}[]
+    for res_idx in 1:nb_dual_sols
+        if MOI.get(inner, MOI.DualStatus(res_idx)) != MOI.FEASIBLE_POINT
+            continue
+        end
+        solcost = 0.0 # TODO : constant in the objective function ?
+        solconstrs = Vector{ConstrId}()
+        solvals = Vector{Float64}()
+        # Get dual value of constraints
+        for (id, constr) in getconstrs(form)
+            iscuractive(form, id) && isexplicit(form, id) || continue
+            moi_index = getindex(getmoirecord(constr))
+            val = MOI.get(inner, MOI.ConstraintDual(res_idx), moi_index)
+            solcost += val * getcurrhs(form, id)
+            val = round(val, digits = Coluna._params_.tol_digits)
+            if abs(val) > Coluna._params_.tol
+                @logmsg LogLevel(-4) string("Constr ", constr.name, " = ", val)
+                push!(solconstrs, id)
+                push!(solvals, val)      
+            end
+        end
+        # Get reduced cost of variables
+        for (id, var) in getvars(form)
+            iscuractive(form, id) && isexplicit(form, id) || continue
+            moi_bounds_index = getbounds(getmoirecord(var))
+            basis_status = MOI.get(inner, MOI.ConstraintBasisStatus(res_idx), moi_bounds_index)
+            val = MOI.get(inner, MOI.ConstraintDual(res_idx), moi_bounds_index)
+            if basis_status == MOI.NONBASIC_AT_LOWER
+                solcost += val * getcurlb(form, id)
+            elseif basis_status == MOI.NONBASIC_AT_UPPER
+                solcost += val * getcurub(form, id)
+            end
+            # TODO : store reduced cost of the variable in the dual constraint ?
+        end
+
+        sense = getobjsense(form) == MaxSense ? -1.0 : 1.0
+        push!(solutions, DualSolution(form, solconstrs, solvals, sense * solcost, FEASIBLE_SOL))
+    end
+    return solutions
+end
 
 function _show_function(io::IO, moi_model::MOI.ModelLike,
                         func::MOI.ScalarAffineFunction)

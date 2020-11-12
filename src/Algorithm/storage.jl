@@ -86,6 +86,8 @@ restorefromstate!(::AbstractModel, ::AbstractStorage, ::EmptyStorageState) = not
 # see https://github.com/atoptima/Coluna.jl/pull/323#discussion_r418972805
 const StorageTypePair = Pair{DataType, DataType}
 
+# TO DO : replace with the set of StorageTypePair, should only contain storages which should 
+#         be restored for writing (all other storages are restored anyway but just for reading)
 const StoragesUsageDict = Dict{Tuple{AbstractModel, StorageTypePair}, StorageAccessMode}
 
 
@@ -307,7 +309,7 @@ end
 
 # this is a "lighter" alternative to restore_states!() function below
 # not used for the moment as it has impact on the code readability
-# we keep this function for while for the case when function restore_states!()
+# we keep this function for a while for the case when function restore_states!()
 # happens to be a bottleneck
 # function reserve_for_writing!(storagecont::StorageContainer{M,S,SS}) where {M,S,SS}
 #     statecont = getcurstatecont(storagecont)
@@ -317,12 +319,12 @@ end
 # end
 
 function restore_states!(ssvector::StorageStatesVector, storages_to_restore::StoragesUsageDict)
-    TO.@timeit Coluna._to "Restore states" begin
+    TO.@timeit Coluna._to "Restore/remove states" begin
         for (storagecont, stateid) in ssvector
             mode = get(
                 storages_to_restore, 
                 (getmodel(storagecont), gettypepair(storagecont)), 
-                NOT_USED
+                READ_ONLY
             )
             restorestate!(storagecont, stateid, mode)
         end
@@ -330,7 +332,14 @@ function restore_states!(ssvector::StorageStatesVector, storages_to_restore::Sto
     empty!(ssvector) # vector of states should be emptied 
 end
 
-remove_states!(states::StorageStatesVector) = restore_states!(states, StoragesUsageDict())
+function remove_states!(ssvector::StorageStatesVector)
+    TO.@timeit Coluna._to "Restore/remove states" begin
+        for (storagecont, stateid) in ssvector
+            restorestate!(storagecont, stateid, NOT_USED)
+        end
+    end
+    empty!(ssvector) # vector of states should be emptied 
+end
 
 function copy_states(states::StorageStatesVector)::StorageStatesVector
     statescopy = StorageStatesVector()

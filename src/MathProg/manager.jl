@@ -39,9 +39,6 @@ function FormulationManager()
     )
 end
 
-haskey(m::FormulationManager, id::Id{Variable}) = haskey(m.vars, id)
-haskey(m::FormulationManager, id::Id{Constraint}) = haskey(m.constrs, id)
-
 function _addvar!(m::FormulationManager, var::Variable)
     haskey(m.vars, var.id) && error(string("Variable of id ", var.id, " exists"))
     m.vars[var.id] = var
@@ -53,18 +50,6 @@ function _addconstr!(m::FormulationManager, constr::Constraint)
     m.constrs[constr.id] = constr
     return
 end
-
-getvar(m::FormulationManager, id::VarId) = m.vars[id]
-getconstr(m::FormulationManager, id::ConstrId) = m.constrs[id]
-getvars(m::FormulationManager) = m.vars
-getvardatas(m::FormulationManager) = m.vardatas
-getconstrs(m::FormulationManager) = m.constrs
-getcoefmatrix(m::FormulationManager) = m.coefficients
-getexpressionmatrix(m::FormulationManager) = m.expressions
-getprimalsolmatrix(m::FormulationManager) = m.primal_sols
-getprimalsolcosts(m::FormulationManager) = m.primal_sol_costs
-getdualsolmatrix(m::FormulationManager) =  m.dual_sols
-getdualsolrhss(m::FormulationManager) =  m.dual_sol_rhss
 
 function Base.show(io::IO, m::FormulationManager)
     println(io, "FormulationManager :")

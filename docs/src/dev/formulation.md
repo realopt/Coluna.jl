@@ -83,3 +83,7 @@ isexplicit
 getname
 ```
 
+```@meta
+CurrentModule = nothing
+DocTestSetup = nothing
+```

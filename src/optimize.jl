@@ -1,7 +1,7 @@
 function _welcome_message()
     welcome = """
     Coluna
-    Version 0.3.1 - https://github.com/atoptima/Coluna.jl
+    Version 0.3.2 - https://github.com/atoptima/Coluna.jl
     """
     print(welcome)
 end
@@ -103,7 +103,6 @@ function optimize!(
     # we copy optimisation state as we want to project the solution to the compact space
     outstate = OptimizationState(
         master,
-        feasibility_status = getfeasibilitystatus(algstate),
         termination_status = getterminationstatus(algstate),
         ip_primal_bound = get_ip_primal_bound(algstate),
         ip_dual_bound = get_ip_dual_bound(algstate),

@@ -27,9 +27,8 @@ function Formulation{D}(
     obj_sense::Type{<:Coluna.AbstractSense} = MinSense
 ) where {D<:AbstractFormDuty}
     return Formulation{D}(
-        getnewuid(form_counter), Counter(), Counter(),
-        parent_formulation, NoOptimizer(), FormulationManager(),
-        obj_sense, FormulationBuffer()
+        getnewuid(form_counter), Counter(), Counter(), parent_formulation, NoOptimizer(), 
+        FormulationManager(), obj_sense, FormulationBuffer()
     )
 end
 
@@ -38,43 +37,44 @@ end
 
 Return `true` if `formulation` has a variable or a constraint with given `id`.
 """
-haskey(formulation::Formulation, id::Id) = haskey(formulation.manager, id)
+haskey(form::Formulation, id::VarId) = haskey(form.manager.vars, id)
+haskey(form::Formulation, id::ConstrId) = haskey(form.manager.constrs, id)
 
 """
     getvar(formulation, varid) -> Variable
 
 Return the variable with given `varid` that belongs to `formulation`.
 """
-getvar(form::Formulation, id::VarId) = getvar(form.manager, id)
+getvar(form::Formulation, id::VarId) = get(form.manager.vars, id, nothing)
 
 """
     getconstr(formulation, constrid) -> Constraint
 
 Return the constraint with given `constrid` that belongs to `formulation`.
 """
-getconstr(form::Formulation, id::ConstrId) = getconstr(form.manager, id)
+getconstr(form::Formulation, id::ConstrId) = get(form.manager.constrs, id, nothing)
 
 """
     getvars(formulation) -> Dict{VarId, Variable}
 
 Return all variables in `formulation`.
 """
-getvars(form::Formulation) = getvars(form.manager)
+getvars(form::Formulation) = form.manager.vars
 
 """
     getconstrs(formulation) -> Dict{ConstrId, Constraint}
 
 Return all constraints in `formulation`.
 """
-getconstrs(form::Formulation) = getconstrs(form.manager)
+getconstrs(form::Formulation) = form.manager.constrs
 
 "Returns the representation of the coefficient matrix stored in the formulation manager."
-getcoefmatrix(form::Formulation) = getcoefmatrix(form.manager)
-getprimalsolmatrix(form::Formulation) = getprimalsolmatrix(form.manager)
-getprimalsolcosts(form::Formulation) = getprimalsolcosts(form.manager)
-getdualsolmatrix(form::Formulation) = getdualsolmatrix(form.manager)
-getdualsolrhss(form::Formulation) = getdualsolrhss(form.manager)
-#getexpressionmatrix(form::Formulation) = getexpressionmatrix(form.manager) # Not used for now
+getcoefmatrix(form::Formulation) = form.manager.coefficients
+getprimalsolmatrix(form::Formulation) = form.manager.primal_sols
+getprimalsolcosts(form::Formulation) = form.manager.primal_sol_costs
+getdualsolmatrix(form::Formulation) = form.manager.dual_sols
+getdualsolrhss(form::Formulation) = form.manager.dual_sol_rhss
+
 
 "Returns the `uid` of `Formulation` `form`."
 getuid(form::Formulation) = form.uid
@@ -376,14 +376,10 @@ function setconstr!(
     return constr
 end
 
-function set_robust_constr_generator!(
-    form::Formulation,
-    kind::ConstrKind,
-    alg::Function
-)
+function set_robust_constr_generator!(form::Formulation, kind::ConstrKind, alg::Function)
     constrgen = RobustConstraintsGenerator(0, kind, alg)
     push!(form.manager.robust_constr_generators, constrgen)
-    return nothing
+    return
 end
 
 get_robust_constr_generators(form::Formulation) = form.manager.robust_constr_generators
@@ -536,15 +532,6 @@ function computereducedrhs(form::Formulation, constrid::Id{Constraint}, primalso
     return constrrhs
 end
 
-"Calls optimization routine for `Formulation` `form`."
-function optimize!(form::Formulation)
-    @logmsg LogLevel(-1) string("Optimizing formulation ", getuid(form))
-    @logmsg LogLevel(-3) form
-    res = optimize!(form, getoptimizer(form))
-    @logmsg LogLevel(-3) "Optimization finished with result:" print(form, res)
-    return res
-end
-
 function initialize_optimizer!(form::Formulation, builder::Function)
     opt = builder()
     form.optimizer = opt
@@ -637,3 +624,24 @@ function write_to_LP_file(form::Formulation, filename::String)
         MOI.write_to_file(dest, filename)
     end
 end
+
+# function getspsol(master::Formulation{DwMaster}, col_id::VarId)
+#     !(getduty(col_id) <= MasterCol) && return
+
+#     spvars = Vector{VarId}()
+#     spvals = Vector{Float64}()
+#     cost = 0.0
+
+#     spuid = getoriginformuid(col_id)
+#     spform = get_dw_pricing_sps(master.parent_formulation)[spuid]
+#     for (repid, repval) in @view getprimalsolmatrix(spform)[:, col_id]
+#         if getduty(repid) <= DwSpPricingVar || getduty(repid) <= DwSpSetupVar
+#             mastrepid = getid(getvar(master, repid))
+#             push!(spvars, mastrepid)
+#             push!(spvals, repval)
+#             cost += getcurcost(master, mastrepid)
+#         end
+#     end
+
+#     return PrimalSolution(spform, spvars, spvals, cost, FEASIBLE_SOL)
+# end

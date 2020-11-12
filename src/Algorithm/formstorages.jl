@@ -42,7 +42,7 @@ function apply_data!(form::Formulation, constr::Constraint, constr_state::Constr
     # Rhs
     if getcurrhs(form, constr) != constr_state.rhs
         @logmsg LogLevel(-2) string("Reseting rhs of constraint ", getname(form, constr))
-        setrhs!(form, constr, constr_state.rhs)
+        setcurrhs!(form, constr, constr_state.rhs)
         @logmsg LogLevel(-3) string("New rhs is ", getcurrhs(form, constr))
     end
     return
@@ -202,7 +202,7 @@ end
 
 function MasterCutsState(form::Formulation, storage::FormulationStorage)
     @logmsg LogLevel(-2) "Storing master cuts"
-    state = BranchingConstrsState(Dict{ConstrId, ConstrState}())
+    state = MasterCutsState(Dict{ConstrId, ConstrState}())
     for (id, constr) in getconstrs(form)
         if getduty(id) <= AbstractMasterCutConstr && 
            iscuractive(form, constr) && isexplicit(form, constr)
@@ -268,20 +268,15 @@ end
 
 function StaticVarConstrStorageState(form::Formulation, storage::FormulationStorage)
     @logmsg LogLevel(-2) string("Storing static vars and consts")
-    state = BranchingConstrsState(Dict{ConstrId, ConstrState}(), Dict{ConstrId, VarState}())
+    state = StaticVarConstrStorageState(Dict{ConstrId, ConstrState}(), Dict{VarId, VarState}())
     for (id, constr) in getconstrs(form)
-        if !(getduty(id) <= AbstractMasterCutConstr) && 
-           !(getduty(id) <= AbstractMasterBranchingConstr) &&
-           iscuractive(form, constr) && isexplicit(form, constr)
-            
+        if isaStaticDuty(getduty(id)) && iscuractive(form, constr) && isexplicit(form, constr)            
             constrstate = ConstrState(getcurrhs(form, constr))
             state.constrs[id] = constrstate
         end
     end
     for (id, var) in getvars(form)
-        if !(getduty(id) <= MasterCol) && 
-           iscuractive(form, var) && isexplicit(form, var)
-            
+        if isaStaticDuty(getduty(id)) && iscuractive(form, var) && isexplicit(form, var)            
             varstate = VarState(getcurcost(form, var), getcurlb(form, var), getcurub(form, var))
             state.vars[id] = varstate
         end
@@ -294,8 +289,7 @@ function restorefromstate!(
 )
     @logmsg LogLevel(-2) "Restoring static vars and consts"
     for (id, constr) in getconstrs(form)
-        if !(getduty(id) <= AbstractMasterCutConstr) && 
-           !(getduty(id) <= AbstractMasterBranchingConstr) && isexplicit(form, constr)
+        if isaStaticDuty(getduty(id)) && isexplicit(form, constr)
             @logmsg LogLevel(-4) "Checking " getname(form, constr)
             if haskey(state.constrs, id) 
                 if !iscuractive(form, constr) 
@@ -313,7 +307,7 @@ function restorefromstate!(
         end
     end
     for (id, var) in getvars(form)
-        if !(getduty(id) <= MasterCol) && isexplicit(form, var)
+        if isaStaticDuty(getduty(id)) && isexplicit(form, var)
             @logmsg LogLevel(-4) "Checking " getname(form, var)
             if haskey(state.vars, id) 
                 if !iscuractive(form, var) 
@@ -345,31 +339,45 @@ const StaticVarConstrStoragePair = (FormulationStorage => StaticVarConstrStorage
 # issues to see : 1) PrimalSolution is parametric; 2) we need a solution concatenation functionality
 
 mutable struct PartialSolutionStorage <: AbstractStorage
-    sol::Dict{VarId, Float64}
-    value::Float64
+    solution::Dict{VarId, Float64}
 end
 
+function add_to_solution!(storage::PartialSolutionStorage, varid::VarId, value::Float64)
+    cur_value = get(storage.solution, varid, 0.0)
+    storage.solution[varid] = cur_value + value
+    return
+end
+
+function get_primal_solution(storage::PartialSolutionStorage, form::Formulation)
+    varids = collect(keys(storage.solution))
+    vals = collect(values(storage.solution))
+    solcost = 0.0
+    for (varid, value) in storage.solution
+        solcost += getcurcost(form, varid) * value
+    end
+    return PrimalSolution(form, varids, vals, solcost, UNKNOWN_FEASIBILITY)
+end    
+
+
 function PartialSolutionStorage(form::Formulation) 
-    return PartialSolutionStorage(Dict{VarId, Float64}(), 0.0)
+    return PartialSolutionStorage(Dict{VarId, Float64}())
 end
 
 # the storage state is the same as the storage here
 mutable struct PartialSolutionStorageState <: AbstractStorageState
-    sol::Dict{VarId, Float64}
-    value::Float64
+    solution::Dict{VarId, Float64}
 end
 
 function PartialSolutionStorageState(form::Formulation, storage::PartialSolutionStorage)
     @logmsg LogLevel(-2) "Storing partial solution"
-    return PartialSolutionStorageState(copy(storage.sol), storage.value)
+    return PartialSolutionStorageState(copy(storage.solution))
 end
 
 function restorefromstate!(
     form::Formulation, storage::PartialSolutionStorage, state::PartialSolutionStorageState
 )
     @logmsg LogLevel(-2) "Restoring partial solution"
-    storage.sol = copy(state.sol)
-    storage.value = copy(state.value)
+    storage.solution = copy(state.solution)
 end
 
-const PartialSolutionStoragePair = (PartialSolutionStorage => StaticVarConstrStorageState)
+const PartialSolutionStoragePair = (PartialSolutionStorage => PartialSolutionStorageState)

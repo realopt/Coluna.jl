@@ -112,9 +112,27 @@ ip_gap(ov::ObjValues) = gap(get_ip_primal_bound(ov), get_ip_dual_bound(ov))
 "Return the gap between the best primal and dual bounds of the linear program."
 lp_gap(ov::ObjValues) = gap(get_lp_primal_bound(ov), get_lp_dual_bound(ov))
 
-#ip_ratio(ov::ObjValues) = get_ip_primal_bound(ov) / get_ip_dual_bound(ov)
+"Return true if the gap between the best primal and dual bounds of the integer program is closed given optimality tolerances."
+function ip_gap_closed(
+    ov::ObjValues; atol = Coluna.DEF_OPTIMALITY_ATOL, rtol = Coluna.DEF_OPTIMALITY_RTOL
+)
+    closed = ip_gap(ov) <= 0
+    closed = closed || isapprox(
+        get_ip_primal_bound(ov).value, get_ip_dual_bound(ov).value, atol = atol, rtol = rtol
+    )
+    return closed
+end
 
-#lp_ratio(ov::ObjValues) = get_lp_primal_bound(ov) / get_lp_dual_bound(ov)
+"Return true if the gap between the best primal and dual bounds of the linear program is closed given optimality tolerances."
+function lp_gap_closed(
+    ov::ObjValues; atol = Coluna.DEF_OPTIMALITY_ATOL, rtol = Coluna.DEF_OPTIMALITY_RTOL
+)
+    closed = lp_gap(ov) <= 0
+    closed = closed || isapprox(
+        get_lp_primal_bound(ov).value, get_lp_dual_bound(ov).value, atol = atol, rtol = rtol
+    )
+    return closed
+end
 
 function set_lp_primal_bound!(ov::ObjValues{S}, b::PrimalBound{S}) where {S}
     ov.lp_primal_bound = b

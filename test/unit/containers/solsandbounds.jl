@@ -217,7 +217,7 @@ function solution_unit()
     Solution = Coluna.ColunaBase.Solution{FakeModel,Int,Float64}
 
     dict_sol, soldecs, solvals = fake_solution_factory(100)
-    primal_sol = Solution(model, soldecs, solvals, 12.3)
+    primal_sol = Solution(model, soldecs, solvals, 12.3, Coluna.ColunaBase.FEASIBLE_SOL)
     test_solution_iterations(primal_sol, dict_sol)
     @test Coluna.ColunaBase.getvalue(primal_sol) == 12.3
     #Coluna.ColunaBase.setvalue!(primal_sol, 123.4)

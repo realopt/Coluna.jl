@@ -2,7 +2,7 @@
     option_use_reduced_cost::Bool = false
     option_increase_cost_in_hybrid_phase::Bool = false
     feasibility_tol::Float64 = 1e-5
-    optimality_tol::Float64 = 1e-5
+    optimality_tol::Float64 = Coluna.DEF_OPTIMALITY_ATOL
     max_nb_iterations::Int = 100
 end
 
@@ -167,15 +167,12 @@ end
 
 function record_solutions!(
     algo::BendersCutGeneration, algdata::BendersCutGenRuntimeData, spform::Formulation,
-    spresult::MoiResult
+    spresult::OptimizationState
 )::Vector{ConstrId}
 
     recorded_dual_solution_ids = Vector{ConstrId}()
 
-    #primal_sols = getprimalsols(spresult)
-    dual_sols = getdualsols(spresult)
-
-    for dual_sol in dual_sols
+    for dual_sol in get_lp_dual_sols(spresult)
         if getvalue(dual_sol) > algo.feasibility_tol 
             (insertion_status, dual_sol_id) = setdualsol!(spform, dual_sol)
             if insertion_status
@@ -218,9 +215,9 @@ function insert_cuts_in_master!(
 end
 
 function compute_benders_sp_lagrangian_bound_contrib(
-    algdata::BendersCutGenRuntimeData, spform::Formulation, spsol::MoiResult
+    algdata::BendersCutGenRuntimeData, spform::Formulation, spsol
 )
-    dualsol = getbestdualsol(spsol)
+    dualsol = get_best_lp_dual_sol(spsol)
     contrib = getvalue(dualsol)
     return contrib
 end
@@ -270,10 +267,11 @@ function solve_sp_to_gencut!(
         # Solve sub-problem and insert generated cuts in master
         # @logmsg LogLevel(-3) "optimizing benders_sp prob"
         TO.@timeit Coluna._to "Bender Sep SubProblem" begin
-            optresult = optimize!(spform)
+            optstate = run!(SolveLpForm(get_dual_solution = true), ModelData(spform), OptimizationInput(OptimizationState(spform)))
         end
 
-        if !isfeasible(optresult) # if status != MOI.OPTIMAL
+        optresult = getoptstate(optstate)
+        if getterminationstatus(optresult) == INFEASIBLE # if status != MOI.OPTIMAL
             sp_is_feasible = false 
             # @logmsg LogLevel(-3) "benders_sp prob is infeasible"
             bd = PrimalBound(spform) 
@@ -282,7 +280,7 @@ function solve_sp_to_gencut!(
 
         benders_sp_lagrangian_bound_contrib = compute_benders_sp_lagrangian_bound_contrib(algdata, spform, optresult)
 
-        primalsol = getbestprimalsol(optresult)
+        primalsol = get_best_lp_primal_sol(optresult)
         spsol_relaxed = contains(primalsol, varid -> getduty(varid) == BendSpSlackFirstStageVar)
 
         benders_sp_primal_bound_contrib = 0.0
@@ -299,7 +297,7 @@ function solve_sp_to_gencut!(
             end
         end
         
-        if - algo.feasibility_tol <= getprimalbound(optresult) <= algo.feasibility_tol
+        if - algo.feasibility_tol <= get_lp_primal_bound(optresult) <= algo.feasibility_tol
         # no cuts are generated since there is no violation 
             if spsol_relaxed
                 if algdata.spform_phase[spform_uid] == PurePhase2
@@ -422,7 +420,7 @@ end
 
 function solve_relaxed_master!(master::Formulation)
     elapsed_time = @elapsed begin
-        optresult = TO.@timeit Coluna._to "relaxed master" optimize!(master)
+        optresult = TO.@timeit Coluna._to "relaxed master" run!(SolveLpForm(get_dual_solution = true), ModelData(master), OptimizationInput(OptimizationState(master)))
     end
     return optresult, elapsed_time
 end
@@ -473,24 +471,25 @@ function bend_cutting_plane_main_loop!(
         nb_new_cuts = 0
         cur_gap = 0.0
         
-        optresult, master_time = solve_relaxed_master!(masterform)
+        optoutput, master_time = solve_relaxed_master!(masterform)
+        optresult = getoptstate(optoutput)
 
-        if getfeasibilitystatus(optresult) == INFEASIBLE
+        if getterminationstatus(optresult) == INFEASIBLE
             db = - getvalue(DualBound(masterform))
             pb = - getvalue(PrimalBound(masterform))
             set_lp_dual_bound!(bnd_optstate, DualBound(masterform, db))
             set_lp_primal_bound!(bnd_optstate, PrimalBound(masterform, pb))
-            setfeasibilitystatus!(bnd_optstate, INFEASIBLE)
+            setterminationstatus!(bnd_optstate, INFEASIBLE)
             return 
         end
-           
-        master_dual_sol = getbestdualsol(optresult)
-        master_primal_sol = getbestprimalsol(optresult)
+        
+        master_dual_sol = get_best_lp_dual_sol(optresult)
+        master_primal_sol = get_best_lp_primal_sol(optresult)
 
-        if !isfeasible(optresult) || master_primal_sol === nothing || master_dual_sol === nothing
-            error("Benders algorithm:  the relaxed master LP is infeasible or unboundedhas no solution.")
-            setfeasibilitystatus!(bnd_optstate, INFEASIBLE)
-            return 
+        if getterminationstatus(optresult) == INFEASIBLE || master_primal_sol === nothing || master_dual_sol === nothing
+            error("Benders algorithm:  the relaxed master LP is infeasible or unbounded has no solution.")
+            setterminationstatus!(bnd_optstate, INFEASIBLE)
+            return
         end
 
         update_lp_dual_sol!(bnd_optstate, master_dual_sol)
@@ -513,7 +512,7 @@ function bend_cutting_plane_main_loop!(
 
             if nb_new_cuts < 0
                 #@error "infeasible subproblem."
-                setfeasibilitystatus!(bnd_optstate, INFEASIBLE)
+                setterminationstatus!(bnd_optstate, INFEASIBLE)
                 return
             end
 
@@ -526,7 +525,6 @@ function bend_cutting_plane_main_loop!(
                 bnd_optstate, nb_new_cuts, nb_bc_iterations, master_time, sp_time
             )
             
-            
             if cur_gap < algo.optimality_tol
                 @logmsg LogLevel(0) "Should stop because pb = $primal_bound & db = $dual_bound"
                 # TODO : problem with the gap
@@ -535,7 +533,7 @@ function bend_cutting_plane_main_loop!(
             
             if nb_bc_iterations >= algo.max_nb_iterations
                 @warn "Maximum number of cut generation iteration is reached."
-                setfeasibilitystatus!(bnd_optstate, INFEASIBLE)
+                setterminationstatus!(bnd_optstate, OTHER_LIMIT)
                 break # loop on separation phases
             end
             

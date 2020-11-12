@@ -20,7 +20,7 @@ function proj_cols_on_rep(sol::PrimalSolution, master::Formulation{DwMaster})
             end
         end
     end
-    return PrimalSolution(master, projected_sol_vars, projected_sol_vals, getvalue(sol))
+    return PrimalSolution(master, projected_sol_vars, projected_sol_vals, getvalue(sol), FEASIBLE_SOL)
 end
 
 projection_is_possible(master::Formulation{BendersMaster}) = false

@@ -21,6 +21,7 @@ global const ClA = Coluna.Algorithm
 include("unit/unit_tests.jl")
 include("show_functions_tests.jl")
 include("full_instances_tests.jl")
+include("user_algorithms_tests.jl")
 include("preprocessing_tests.jl")
 include("pricing_callback_tests.jl")
 
@@ -33,9 +34,13 @@ unit_tests()
     full_instances_tests()
 end
 
-@testset "Preprocessing " begin
-    preprocessing_tests()
+@testset "User algorithms" begin
+    user_algorithms_tests()
 end
+
+# @testset "Preprocessing " begin
+#     preprocessing_tests()
+# end
 
 @testset "pricing callback" begin
     pricing_callback_tests()

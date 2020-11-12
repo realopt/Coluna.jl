@@ -11,13 +11,11 @@ const SupportedConstrFunc = Union{MOI.ScalarAffineFunction{Float64}}
 const SupportedConstrSets = Union{MOI.EqualTo{Float64}, MOI.GreaterThan{Float64},
     MOI.LessThan{Float64}}
 
-
 @enum(
     ObjectiveType,
     SINGLE_VARIABLE,
     SCALAR_AFFINE
 )
-
 mutable struct Optimizer <: MOI.AbstractOptimizer
     inner::Problem
     objective_type::ObjectiveType
@@ -77,6 +75,8 @@ function _get_orig_varid_in_form(
     origid = _get_orig_varid(optimizer, x)
     return getid(getvar(form, origid))
 end
+
+MOI.get(optimizer::Coluna.Optimizer, ::MOI.SolverName) = "Coluna"
 
 function MOI.optimize!(optimizer::Optimizer)
     optimizer.result = optimize!(
@@ -490,6 +490,11 @@ function MOI.empty!(optimizer::Optimizer)
     optimizer.inner.re_formulation = nothing
 end
 
+function MOI.get(model::Coluna.Optimizer, ::MOI.NumberOfVariables)
+    orig_form = get_original_formulation(model.inner)
+    return length(getvars(orig_form))
+end
+
 # ######################
 # ### Get functions ####
 # ######################
@@ -526,14 +531,5 @@ function MOI.get(optimizer::Optimizer, ::MOI.VariablePrimal, refs::Vector{MOI.Va
 end
 
 function MOI.get(optimizer::Optimizer, object::MOI.TerminationStatus)
-    result = optimizer.result
-    isfeasible(result) && return MathProg.convert_status(getterminationstatus(result))
-    getfeasibilitystatus(result) == INFEASIBLE && return MOI.INFEASIBLE
-    getfeasibilitystatus(result) == UNKNOWN_FEASIBILITY && return MOI.OTHER_LIMIT
-    error(string(
-        "Could not determine MOI status. Coluna termination : ",
-        getterminationstatus(result), ". Coluna feasibility : ",
-        getfeasibilitystatus(result)
-    ))
-    return
+    return MathProg.convert_status(getterminationstatus(optimizer.result))
 end

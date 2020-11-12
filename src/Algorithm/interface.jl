@@ -79,7 +79,7 @@ end
 """
     OptimizationInput
 
-    Contains OptimizationResult
+    Contains OptimizationState
 """
 struct OptimizationInput{F,S} <: AbstractInput
     optstate::OptimizationState{F,S}

@@ -25,9 +25,9 @@ end
 """
 
 struct PrioritisedBranchingRule
+    rule::AbstractBranchingRule
     root_priority::Float64
     nonroot_priority::Float64
-    rule::AbstractBranchingRule
 end
 
 function getpriority(rule::PrioritisedBranchingRule, isroot::Bool)::Float64
@@ -63,7 +63,7 @@ end
 # default parameterisation corresponds to simple branching (no strong branching phases)
 function SimpleBranching()::AbstractDivideAlgorithm
     algo = StrongBranching()
-    push!(algo.rules, PrioritisedBranchingRule(1.0, 1.0, VarBranchingRule()))
+    push!(algo.rules, PrioritisedBranchingRule(VarBranchingRule(), 1.0, 1.0))
     return algo
 end
 
@@ -96,8 +96,8 @@ function perform_strong_branching_with_phases!(
     parent = getparent(input)
     master = getmaster(getreform(data))
     exploitsprimalsolutions::Bool = exploits_primal_solutions(algo)
-    sbstate = CopyBoundsAndStatusesFromOptState(
-        master, getoptstate(input), exploitsprimalsolutions
+    sbstate = OptimizationState(
+        master, getoptstate(input), exploitsprimalsolutions, false
     )
 
     for (phase_index, current_phase) in enumerate(algo.phases)
@@ -223,8 +223,8 @@ function run!(algo::StrongBranching, data::ReformData, input::DivideInput)::Divi
     # we obtain the original and extended solutions
     reform = getreform(data)
     master = getmaster(reform)
-    original_solution = PrimalSolution(getmaster(reform))
-    extended_solution = PrimalSolution(getmaster(reform))
+    original_solution = nothing
+    extended_solution = nothing
     if nb_lp_primal_sols(optstate) > 0
         if projection_is_possible(master)
             extended_solution = get_best_lp_primal_sol(optstate)
@@ -233,7 +233,7 @@ function run!(algo::StrongBranching, data::ReformData, input::DivideInput)::Divi
             original_solution = get_best_lp_primal_sol(optstate)
         end
     else
-        @logmsg LogLevel(0) "Warning: no LP solution is passed to the branching algorithm. No children will be generated."
+        @warn "no LP solution is passed to the branching algorithm. No children will be generated."
         return DivideOutput(Vector{Node}(), optstate)
     end
 
@@ -270,7 +270,7 @@ function run!(algo::StrongBranching, data::ReformData, input::DivideInput)::Divi
         append!(kept_branch_groups, output.groups)
         local_id = output.local_id
 
-        if projection_is_possible(master)
+        if projection_is_possible(master) && extended_solution !== nothing
             output = run!(rule, data, BranchingRuleInput(
                 extended_solution, false, nb_candidates_needed, algo.selection_criterion,
                 local_id, algo.int_tol

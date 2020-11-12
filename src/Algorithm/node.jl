@@ -15,11 +15,12 @@ mutable struct Node
 end
 
 function RootNode(
-    form::AbstractFormulation, treestate::OptimizationState, storagestateids::StorageStatesVector, skipconquer::Bool
+    form::AbstractFormulation, optstate::OptimizationState, storagestateids::StorageStatesVector, skipconquer::Bool
 )
-    nodestate = CopyBoundsAndStatusesFromOptState(form, treestate, false)
+    nodestate = OptimizationState(form, optstate, false, skipconquer)
+    tree_order = skipconquer ? 0 : -1
     return Node(
-        -1, false, 0, nothing, nodestate, "", storagestateids, skipconquer
+        tree_order, false, 0, nothing, nodestate, "", storagestateids, skipconquer
     )
 end
 
@@ -27,7 +28,7 @@ function Node(
     form::AbstractFormulation, parent::Node, branchdescription::String, storagestateids::StorageStatesVector
 )
     depth = getdepth(parent) + 1
-    nodestate = CopyBoundsAndStatusesFromOptState(form, getoptstate(parent), false)
+    nodestate = OptimizationState(form, getoptstate(parent), false, false)
     
     return Node(
         -1, false, depth, parent, nodestate, branchdescription, storagestateids, false
@@ -57,9 +58,9 @@ isrootnode(n::Node) = n.tree_order == 1
 getinfeasible(n::Node) = n.infesible
 setinfeasible(n::Node, status::Bool) = n.infeasible = status
 
+# TODO remove
 function to_be_pruned(node::Node)
     nodestate = getoptstate(node)
-    isinfeasible(nodestate) && return true
-    bounds_ratio = get_ip_primal_bound(nodestate) / get_ip_dual_bound(nodestate)
-    return isapprox(bounds_ratio, 1) || ip_gap(nodestate) < 0
+    getterminationstatus(nodestate) == INFEASIBLE && return true
+    return ip_gap_closed(nodestate)
 end

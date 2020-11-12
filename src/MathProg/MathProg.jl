@@ -44,30 +44,27 @@ include("MOIinterface.jl")
 # TODO : clean up
 # Types
 export  MaxSense, MinSense, MoiOptimizer,
-         Id, ConstrSense, VarSense,
+        Id, ConstrSense, VarSense,
         FormId, FormulationPhase, Annotations,
         Counter, UserOptimizer, MoiObjective
 
 # Methods
 export no_optimizer_builder, set_original_formulation!,
        getid, getuid,
-       nbprimalsols, getdualbound,
-       getprimalbound,
        enforce_integrality!, relax_integrality!,
-       getobjsense, getoptimizer, getbestprimalsol,
-       add_primal_sol!, setdualbound!,
-       getprimalsols, getdualsols,
+       getobjsense, getoptimizer,
+       setdualbound!,
        computereducedcost,
        update!,
-       convert_status, getduty, getbestdualsol,
+       convert_status, getduty,
        computereducedrhs,
-       unsafe_getbestprimalsol,
-        find_owner_formulation,
+       find_owner_formulation,
        getsortuid,
-       contains, setprimalbound!, get_original_formulation
+       contains, setprimalbound!, get_original_formulation,
+       getoriginformuid, getspsol, sync_solver!, getinner,
+       get_primal_solutions, get_dual_solutions
 
 # Below this line, clean up has been done :
-export optimize!
 
 # Methods related to Problem
 export Problem, set_initial_dual_bound!, set_initial_primal_bound!,
@@ -101,17 +98,14 @@ export Variable, Constraint, VarId, ConstrId, VarMembership, ConstrMembership,
     isexplicit, getname, reset!, getreducedcost
 
 # Types & methods related to solutions & bounds
-# Note : we should export only get methods for MoiResult (the solution is built in MathProg)
-export PrimalBound, DualBound, PrimalSolution, DualSolution, ObjValues, TerminationStatus,
-    FeasibilityStatus, MoiResult, OPTIMAL, TIME_LIMIT, NODE_LIMIT, OTHER_LIMIT,
-    EMPTY_RESULT, NOT_YET_DETERMINED, INFEASIBLE, UNKNOWN_FEASIBILITY, FEASIBLE,
-    getterminationstatus, getfeasibilitystatus, setterminationstatus!,
-    setfeasibilitystatus!, isfeasible, get_ip_primal_bound, get_lp_primal_bound,
+export PrimalBound, DualBound, PrimalSolution, DualSolution, ObjValues,
+    get_ip_primal_bound, get_lp_primal_bound,
     get_ip_dual_bound, get_lp_dual_bound, update_ip_primal_bound!, update_lp_primal_bound!,
     update_ip_dual_bound!, update_lp_dual_bound!, set_ip_primal_bound!,
-    set_lp_primal_bound!, set_ip_dual_bound!, set_lp_dual_bound!, ip_gap
+    set_lp_primal_bound!, set_ip_dual_bound!, set_lp_dual_bound!, ip_gap, lp_gap, ip_gap_closed, 
+    lp_gap_closed
 
-# methods related to projections
+# Methods related to projections
 export projection_is_possible, proj_cols_on_rep
 
 end

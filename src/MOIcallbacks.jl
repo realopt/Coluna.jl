@@ -19,11 +19,9 @@ function MOI.submit(
 )
     form = cb.callback_data.form
     S = getobjsense(form)
-    result = MoiResult(form)
     solval = cost
-
     colunavarids = [_get_orig_varid_in_form(model, form, v) for v in variables]
-    
+
     # setup variable
     setup_var_id = [id for (id,v) in Iterators.filter(
         v -> (iscuractive(form, v.first) && isexplicit(form, v.first) && getduty(v.first) <= DwSpSetupVar),
@@ -33,10 +31,8 @@ function MOI.submit(
     push!(values, 1.0)
     solval += getcurcost(form, setup_var_id)
 
-    add_primal_sol!(result, PrimalSolution(form, colunavarids, values, solval))
-    setfeasibilitystatus!(result, FEASIBLE)
-    setterminationstatus!(result, OPTIMAL)
-    cb.callback_data.result = result
+    sol = PrimalSolution(form, colunavarids, values, solval, FEASIBLE_SOL)
+    push!(cb.callback_data.primal_solutions, sol)
     return
 end
 

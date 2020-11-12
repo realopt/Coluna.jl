@@ -54,9 +54,10 @@ mutable struct MoiVarRecord
     kind::MoiVarKind
 end
 
-MoiVarRecord(;index::MoiVarIndex = MoiVarIndex()) = MoiVarRecord(
-    index, MoiVarBound(), MoiVarKind()
-)
+function MoiVarRecord(;index::MoiVarIndex = MoiVarIndex())
+    return MoiVarRecord(index, MoiVarBound(), MoiVarKind())
+end
+
 getindex(record::MoiVarRecord) = record.index
 getbounds(record::MoiVarRecord) = record.bounds
 getkind(record::MoiVarRecord) = record.kind

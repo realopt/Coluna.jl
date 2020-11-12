@@ -1,35 +1,154 @@
 
 """
-    PreprocessingStoragePair
+    PreprocessingStorage
 
-    Storage pair for preprocessing information
-    Consists of PreprocessingStorage and PreprocessingStorageState.    
+    Storage for preprocessing. Contains global data: slacks of constraints,
+    subproblem bounds, new constraints the local partial solution to preprocess.
+    Contains also local data : stack of constraints to preprecess, as well as the
+    vectors of preprocessed constraints and variables.  
 """
 
 mutable struct PreprocessingStorage <: AbstractStorage
-    localpartialsol::Dict{VarId, Float64}
+    # global data 
+    cur_min_slack::Dict{ConstrId,Float64}
+    cur_max_slack::Dict{ConstrId,Float64}
+    nb_inf_sources_for_min_slack::Dict{ConstrId,Int}
+    nb_inf_sources_for_max_slack::Dict{ConstrId,Int}
+    cur_sp_lower_bounds::Dict{FormId,Int}
+    cur_sp_upper_bounds::Dict{FormId,Int}
+    new_constrs::Vector{Tuple{ConstrId,Formulation}}
+    local_partial_sol::Dict{VarId, Float64}
+
+    # local data 
+    stack::DS.Stack{Tuple{ConstrId,Formulation}}
+    constrs_in_stack::Set{ConstrId}
+    preprocessed_constrs::Set{Tuple{ConstrId,Formulation}}
+    sp_vars_with_changed_bounds::Set{Tuple{VarId,Formulation}}
 end
 
-function PreprocessingStorage(form::Formulation) 
-    return PreprocessingStorage(Dict{VarId, Float64}())
+function PreprocessingStorage(reform::Reformulation) 
+    constraints = Tuple{ConstrId,Formulation}[]
+
+    # Master constraints
+    master = getmaster(reform)
+    for (constrid, constr) in getconstrs(master)
+        iscuractive(master, constrid) || continue
+        isexplicit(master, constrid) || continue
+        getduty(constrid) != MasterConvexityConstr || continue
+        push!(constraints, (constrid, master))   
+    end
+    
+    # Subproblem constraints
+    for (spuid, spform) in get_dw_pricing_sps(reform)
+        for (constrid, constr) in getconstrs(spform)
+            iscuractive(spform, constrid) || continue
+            isexplicit(spform, constrid) || continue
+            push!(constraints, (constrid, spform))   
+        end
+    end
+
+    cur_sp_lower_bounds = Dict{FormId,Int}()
+    cur_sp_upper_bounds = Dict{FormId,Int}()
+    for (spuid, spform) in get_dw_pricing_sps(reform)
+        cur_sp_lower_bounds[spuid] = 
+            getcurrhs(master, get_dw_pricing_sp_lb_constrid(reform, spuid))
+        cur_sp_upper_bounds[spuid] = 
+            getcurrhs(master, get_dw_pricing_sp_ub_constrid(reform, spuid))
+    end
+
+    return PreprocessingStorage(
+        Dict{ConstrId,Float64}(), Dict{ConstrId,Float64}(), 
+        Dict{ConstrId,Int}(), Dict{ConstrId,Int}(), cur_sp_lower_bounds,
+        cur_sp_upper_bounds, constraints, Dict{VarId, Float64}(), 
+        DS.Stack{Tuple{ConstrId,Formulation}}(), Set{ConstrId}(),
+        Set{Tuple{ConstrId,Formulation}}(), Set{Tuple{VarId, Formulation}}())
 end
+
+function empty_local_data!(storage::PreprocessingStorage)
+    empty!(storage.stack)
+    empty!(storage.constrs_in_stack)
+    empty!(storage.preprocessed_constrs)
+    empty!(storage.sp_vars_with_changed_bounds)
+end
+
+function add_to_localpartialsol!(storage::PreprocessingStorage, varid::VarId, value::Float64)
+    cur_value = get(storage.local_partial_sol, varid, 0.0)
+    storage.local_partial_sol[varid] = cur_value + value
+    return
+end
+
+function get_local_primal_solution(storage::PreprocessingStorage, form::Formulation)
+    varids = collect(keys(storage.local_partial_sol))
+    vals = collect(values(storage.local_partial_sol))
+    solcost = 0.0
+    for (varid, value) in storage.local_partial_sol
+        solcost += getcurcost(form, varid) * value
+    end
+    return PrimalSolution(form, varids, vals, solcost, UNKNOWN_FEASIBILITY)
+end    
+
+function add_to_stack!(
+    storage::PreprocessingStorage, constrid::ConstrId, form::Formulation
+)
+    if constrid ∉ storage.constrs_in_stack  
+        push!(storage.constrs_in_stack, constrid)
+        push!(storage.stack, (constrid, form))
+    end
+    return
+end
+
+"""
+    PreprocessingStorageState
+
+    Stores the global part of preprocessing storage
+"""
 
 mutable struct PreprocessingStorageState <: AbstractStorageState
-    localpartialsol::Dict{VarId, Float64}
+    cur_min_slack::Dict{ConstrId,Float64}
+    cur_max_slack::Dict{ConstrId,Float64}
+    nb_inf_sources_for_min_slack::Dict{ConstrId,Int}
+    nb_inf_sources_for_max_slack::Dict{ConstrId,Int}
+    cur_sp_lower_bounds::Dict{FormId,Int}
+    cur_sp_upper_bounds::Dict{FormId,Int}
+    new_constrs::Vector{Tuple{ConstrId,Formulation}}
+    local_partial_sol::Dict{VarId, Float64}
 end
 
-function PreprocessingStorageState(form::Formulation, storage::PreprocessingStorage)
-    return PreprocessingStorageState(copy(storage.localpartialsol))
+function PreprocessingStorageState(reform::Reformulation, storage::PreprocessingStorage)
+    return PreprocessingStorageState(
+        copy(storage.cur_min_slack), copy(storage.cur_max_slack), 
+        copy(storage.nb_inf_sources_for_min_slack),
+        copy(storage.nb_inf_sources_for_max_slack),
+        copy(storage.cur_sp_lower_bounds), copy(storage.cur_sp_upper_bounds), 
+        copy(storage.new_constrs), copy(storage.local_partial_sol))
 end
 
 function restorefromstate!(
-    form::Formulation, storage::PreprocessingStorage, state::PreprocessingStorageState
+    form::Reformulation, storage::PreprocessingStorage, state::PreprocessingStorageState
 )
-    storage.localpartialsol = copy(state.localpartialsol)
+    storage.cur_min_slack = copy(state.cur_min_slack)
+    storage.cur_max_slack = copy(state.cur_max_slack)
+    storage.nb_inf_sources_for_min_slack = copy(state.nb_inf_sources_for_min_slack)
+    storage.nb_inf_sources_for_max_slack = copy(state.nb_inf_sources_for_max_slack)
+    storage.cur_sp_lower_bounds = copy(state.cur_sp_lower_bounds)
+    storage.cur_sp_upper_bounds = copy(state.cur_sp_upper_bounds)
+    storage.new_constrs = copy(state.new_constrs)
+    storage.local_partial_sol = copy(state.local_partial_sol)
 end
 
 const PreprocessingStoragePair = (PreprocessingStorage => PreprocessingStorageState)
 
+
+"""
+    PreprocessingOutput
+
+"""
+
+struct PreprocessingOutput <: AbstractOutput
+    infeasible::Bool
+end
+
+isinfeasible(output::PreprocessingOutput) = output.infeasible
 
 """
     PreprocessingAlgorithm
@@ -38,9 +157,8 @@ const PreprocessingStoragePair = (PreprocessingStorage => PreprocessingStorageSt
 
 @with_kw struct PreprocessAlgorithm <: AbstractAlgorithm 
     preprocess_subproblems::Bool = true # TO DO : this paramter is not yet implemented
+    printing::Bool = false
 end
-
-# PreprocessAlgorithm does not have child algorithms, therefore get_child_algorithms() is not defined
 
 function get_storages_usage(algo::PreprocessAlgorithm, form::Formulation) 
     return [(form, StaticVarConstrStoragePair, READ_AND_WRITE), 
@@ -48,10 +166,11 @@ function get_storages_usage(algo::PreprocessAlgorithm, form::Formulation)
 end
 
 function get_storages_usage(algo::PreprocessAlgorithm, reform::Reformulation) 
-    master = getmaster(reform)
     storages_usage = Tuple{AbstractModel, StorageTypePair, StorageAccessMode}[]     
+    push!(storages_usage, (reform, PreprocessingStoragePair, READ_AND_WRITE))
+
+    master = getmaster(reform)
     push!(storages_usage, (master, StaticVarConstrStoragePair, READ_AND_WRITE))
-    push!(storages_usage, (master, PreprocessingStoragePair, READ_AND_WRITE))
     push!(storages_usage, (master, MasterBranchConstrsStoragePair, READ_AND_WRITE))
     push!(storages_usage, (master, MasterCutsStoragePair, READ_AND_WRITE))
 
@@ -64,552 +183,533 @@ function get_storages_usage(algo::PreprocessAlgorithm, reform::Reformulation)
     return storages_usage
 end
 
-# TO DO : all these data should be moved to PreprocessingStorage
-mutable struct PreprocessData
-    reformulation::Reformulation # Should handle reformulation & formulation
-    constr_in_stack::Dict{ConstrId,Bool}
-    stack::DS.Stack{Tuple{Constraint,Formulation}}
-    cur_min_slack::Dict{ConstrId,Float64}
-    cur_max_slack::Dict{ConstrId,Float64}
-    nb_inf_sources_for_min_slack::Dict{ConstrId,Int}
-    nb_inf_sources_for_max_slack::Dict{ConstrId,Int}
-    preprocessed_constrs::Vector{Constraint}
-    preprocessed_vars::Vector{Variable}
-    cur_sp_bounds::Dict{FormId,Tuple{Int,Int}}
-    local_partial_sol::Vector{Tuple{Variable, Int}}
-    printing::Bool
-end
-
-function PreprocessData(rfdata::ReformData)
-
-    reform = getreform(rfdata)
-    masterdata = getmasterdata(rfdata)
-    master = getmodel(masterdata)
-
-    storage = getstorage(masterdata, PreprocessingStoragePair) 
-
-    local_partial_sol = [(varid, value) for (varid, value) in storage.localpartialsol]
-    empty!(storage.localpartialsol)
-    
-    cur_sp_bounds = Dict{FormId,Tuple{Int,Int}}()
-    master = getmaster(reform)
-    for (spuid, spform) in get_dw_pricing_sps(reform)
-        cur_sp_bounds[spuid] = (
-            getcurrhs(master, get_dw_pricing_sp_lb_constrid(reform, spuid)), 
-            getcurrhs(master, get_dw_pricing_sp_ub_constrid(reform, spuid))
-        )
-    end
-    return PreprocessData(
-        reform, Dict{ConstrId,Bool}(),
-        DS.Stack{Tuple{Constraint, Formulation}}(), Dict{ConstrId,Float64}(),
-        Dict{ConstrId,Float64}(), Dict{ConstrId,Int}(), Dict{ConstrId,Int}(), 
-        Constraint[], Variable[], cur_sp_bounds, local_partial_sol, false
-    )
-end
-
-struct PreprocessingOutput <: AbstractOutput
-    infeasible::Bool
-end
-
-isinfeasible(output::PreprocessingOutput) = output.infeasible
-
-function run!(algo::PreprocessAlgorithm, rfdata::ReformData, input::EmptyInput)::PreprocessingOutput
+function run!(algo::PreprocessAlgorithm, data::ReformData, input::EmptyInput)::PreprocessingOutput
     @logmsg LogLevel(-1) "Run preprocessing"
 
-    alg_data = PreprocessData(rfdata)
-    master = getmaster(alg_data.reformulation)
+    storage = getstorage(data, PreprocessingStoragePair)
+    
+    infeasible = init_new_constraints!(algo, storage) 
 
-    (vars_with_modified_bounds,
-    constrs_with_modified_rhs) = fix_local_partial_solution!(alg_data)
+    master = getmodel(getmasterdata(data))
+    !infeasible && (infeasible = fix_local_partial_solution!(algo, storage, master))
 
-    if initconstraints!(alg_data, constrs_with_modified_rhs)
-        return PreprocessingOutput(true)
-    end
+    !infeasible && (infeasible = propagation!(algo, storage))
 
-    # Now we try to update local bounds of sp vars
-    for var in vars_with_modified_bounds
-        update_lower_bound!(algo, var, master, getcurlb(master, var), false)
-        update_upper_bound!(algo, var, master, getcurub(master, var), false)
-    end
+    !infeasible && algo.preprocess_subproblems && forbid_infeasible_columns!(algo, storage, master)
 
-    infeasible = propagation!(alg_data) 
-    if !infeasible
-        forbid_infeasible_columns!(alg_data)
-    end
-    @logmsg LogLevel(0) "Preprocessing done."
+    !infeasible && remove_preprocessed_constraints(algo, storage)
+
+    @logmsg LogLevel(0) (infeasible ? "Preprocessing determined infeasibility" 
+                                    : "Preprocessing done.")
+    empty_local_data!(storage)
+
     return PreprocessingOutput(infeasible)
 end
 
-function change_sp_bounds!(alg_data::PreprocessData)
-    reformulation = alg_data.reformulation
-    master = getmaster(reformulation)
-    sps_with_modified_bounds = []
-    
-    for (col, col_val) in alg_data.local_partial_sol
-        spform = getsp(alg_data, col)
-        sp_form_id = getuid(spform)
-        if alg_data.cur_sp_bounds[sp_form_id][1] > 0
-            alg_data.cur_sp_bounds[sp_form_id] = (
-                max(alg_data.cur_sp_bounds[sp_form_id][1] - col_val, 0),
-                alg_data.cur_sp_bounds[sp_form_id][2]
-            )
-            setrhs!(
-                master, reformulation.dw_pricing_sp_lb[sp_form_id], 
-                alg.cur_sp_bounds[sp_form_id][1]
-            )
-        end
-        alg_data.cur_sp_bounds[sp_form_id] = (
-            alg_data.cur_sp_bounds[sp_form_id][1],
-            alg_data.cur_sp_bounds[sp_form_id][2] - col_val
+function change_sp_lower_bound!(
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, spform::Formulation{DwSp}, newbound::Int
+    )
+    spuid = getuid(spform)
+    curbound = storage.cur_sp_lower_bounds[spuid]
+    newbound = max(newbound, 0)
+    if curbound > newbound
+        master = spform.parent_formulation
+        reformulation = master.parent_formulation
+        lb_constr_id = reformulation.dw_pricing_sp_lb[spuid]
+        algo.printing && println(
+            "Rhs of constr ", getname(master, lb_constr_id),
+            " is changed from ", Float64(curbound), " to ", Float64(newbound)
         )
-        setrhs!(
-            master, reformulation.dw_pricing_sp_ub[sp_form_id],
-            alg_data.cur_sp_bounds[sp_form_id][2]
-        )
-        @assert alg_data.cur_sp_bounds[sp_form_id][2] >= 0
-        if !(spform in sps_with_modified_bounds)
-            push!(sps_with_modified_bounds, spform)
-        end
-    end
-    return sps_with_modified_bounds
+        setcurrhs!(master, lb_constr_id, Float64(newbound))
+        storage.cur_sp_lower_bounds[spuid] = newbound
+    end 
 end
 
-function getsp(alg_data::PreprocessData, col::Variable)
-    master = getmaster(alg_data.reformulation)
-    primal_sp_sols = getprimalsolmatrix(master)
-    for (sp_varid, sp_var_val) in primal_sp_sols[:,getid(getid(col))]
-        sp_var = getvar(master, sp_varid)
-        return find_owner_formulation(alg_data.reformulation, sp_var)
-    end
-end
+function change_sp_upper_bound!(
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, spform::Formulation{DwSp}, newbound::Int;
+    update_global_var_bounds::Bool = false
+    )
+    @assert newbound >= 0
+    spuid = getuid(spform)
+    curbound = storage.cur_sp_upper_bounds[spuid]
+    if curbound > newbound
+        master = spform.parent_formulation
+        reformulation = master.parent_formulation
+        ub_constr_id = reformulation.dw_pricing_sp_ub[spuid]
+        algo.printing && println(
+            "Rhs of constr ", getname(master, ub_constr_id),
+            " is changed from ", Float64(curbound), " to ", Float64(newbound)
+        )
+        setcurrhs!(master, ub_constr_id, Float64(newbound))
+        storage.cur_sp_upper_bounds[spuid] = newbound
 
-function project_local_partial_solution(alg_data::PreprocessData)
-    sp_vars_vals = Dict{VarId,Float64}()
-    primal_sp_sols = getprimalsolmatrix(getmaster(alg_data.reformulation))
-    for (col, col_val) in alg_data.local_partial_sol
-        for (sp_var_id, sp_var_val) in primal_sp_sols[:,getid(getid(col))]
-            if !haskey(sp_vars_vals, sp_var_id)
-                sp_vars_vals[sp_var_id] = col_val * sp_var_val
-            else
-                sp_vars_vals[sp_var_id] += col_val * sp_var_val
+        if update_global_var_bounds
+            for (varid, var) in getvars(spform)
+                update_bounds_of_master_representative!(algo, storage, varid, spform)
+
             end
         end
-    end
-    return sp_vars_vals
+    end 
 end
 
-function fix_local_partial_solution!(alg_data::PreprocessData)
-    sps_with_modified_bounds = change_sp_bounds!(alg_data)
-    sp_vars_vals = project_local_partial_solution(alg_data)
+function update_bounds_of_master_representative!(
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, varid::VarId, spform::Formulation{DwSp};
+    value_to_substract::Float64 = 0.0
+    )
+    iscuractive(spform, varid) || return false
+    getduty(varid) <= DwSpPricingVar || return false
+    master = spform.parent_formulation
+    spuid = getuid(spform)
 
-    # Updating rhs of master constraints
-    master = getmaster(alg_data.reformulation)
-    master_coef_matrix = getcoefmatrix(master)
-    constrs_with_modified_rhs = Constraint[]
-    for (varid, val) in sp_vars_vals 
-        for (constrid, coef) in master_coef_matrix[:,varid]
-            iscuractive(master, constrid) || continue
-            isexplicit(master, constrid) || continue
-            setrhs!(master, constrid, getcurrhs(master, constrid) - val * coef)
-            push!(constrs_with_modified_rhs, getconstr(master, constrid))
-        end
+    # it is important to update first the lower bound and then the upper bound, 
+    # as the changes are imposed here and not verified for monotonicity
+
+    new_global_lb = max(
+        getcurlb(master, varid) - value_to_substract, 
+        getcurlb(spform, varid) * storage.cur_sp_lower_bounds[spuid]
+    )
+    if update_lower_bound!(
+        algo, storage, getvar(master, varid), master, new_global_lb, 
+        check_monotonicity = false) # this is to impose the bound change 
+        return true
+    end
+
+    new_global_ub = min(
+        getcurub(master, varid) - value_to_substract,
+        getcurub(spform, varid) * storage.cur_sp_upper_bounds[spuid]
+    )
+    if update_upper_bound!(algo, storage, getvar(master, varid), master, new_global_ub)
+        return true
+    end 
+    return false
+end
+
+function change_subprob_bounds!(
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, master::Formulation{DwMaster},
+    original_solution::PrimalSolution
+    )
+
+    sps_with_modified_bounds = Set{Formulation}()
+    reformulation = master.parent_formulation
+    for (col_id, col_val) in storage.local_partial_sol
+        getduty(col_id) <= MasterCol || continue
+        spuid = getoriginformuid(col_id)
+        spform = get_dw_pricing_sps(reformulation)[spuid]
+
+        new_lower_bound = max(storage.cur_sp_lower_bounds[spuid] - Int64(col_val), 0)
+        change_sp_lower_bound!(algo, storage, spform, new_lower_bound)
+
+        new_upper_bound = storage.cur_sp_upper_bounds[spuid] - Int64(col_val)
+        change_sp_upper_bound!(algo, storage, spform, new_upper_bound)
+
+        push!(sps_with_modified_bounds, spform)
     end
 
     # Changing global bounds of subprob variables
-    vars_with_modified_bounds = Variable[]
-    for sp_prob in sps_with_modified_bounds
-        (cur_sp_lb, cur_sp_ub) = alg_data.cur_sp_bounds[getuid(sp_prob)]
-
+    for spform in sps_with_modified_bounds
         for (varid, var) in getvars(spform)
-            iscuractive(spform, varid) || continue
-            getduty(varid) <=  AbstractDwSpVar || continue
-            var_val_in_local_sol = (
-                haskey(sp_vars_vals, varid) ? sp_vars_vals[varid] : 0.0
-            )
-            bounds_changed = false
-
-            clone_in_master = getvar(master, varid)
-            new_global_lb = max(
-                getcurlb(master, clone_in_master) - var_val_in_local_sol,
-                getcurlb(sp_prob, var) * cur_sp_lb
-            )
-            if new_global_lb != getcurlb(master, clone_in_master)
-                setlb!(clone_in_master) = new_global_lb
-                bounds_changed = true
-            end
-
-            new_global_ub = min(
-                getcurub(master, clone_in_master) - var_val_in_local_sol,
-                getcurub(sp_prob, var) * cur_sp_ub
-            )
-            if new_global_ub != getcurub(master, clone_in_master)
-                setub!(clone_in_master) = new_global_ub
-                bounds_changed = true
-            end
-
-            if bounds_changed
-                push!(vars_with_modified_bounds, clone_in_master)
+            if update_bounds_of_master_representative!(
+                algo, storage, varid, spform, value_to_substract = original_solution[varid]
+                )
+                return true
             end
         end
     end
-    return (vars_with_modified_bounds, constrs_with_modified_rhs)
+    return false    
 end
 
-function initconstraints!(
-        alg_data::PreprocessData, constrs_with_modified_rhs::Vector{Constraint}
+function fix_local_partial_solution!(
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, form::Formulation
     )
-    # Contains the constraints to start propagation
-    constrs_to_stack = Tuple{Constraint,Formulation}[]
+    isempty(storage.local_partial_sol) && return false
 
-    # Master constraints
-    master = getmaster(alg_data.reformulation)
-    master_coef_matrix = getcoefmatrix(master)
-    for (constrid, constr) in getconstrs(master)
-        iscuractive(master, constrid) || continue
-        isexplicit(master, constrid) || continue
-        getduty(constrid) == MasterConvexityConstr || continue
-        initconstraint!(alg_data, constr, master)
-        push!(constrs_to_stack, (constr, master))   
+    solution = get_local_primal_solution(storage, form)
+    if isa(form, Formulation{DwMaster}) 
+        solution = proj_cols_on_rep(solution, form)
     end
+    algo.printing && print("Local partial solution in preprocessing is ", solution)
 
-    # Subproblem constraints
-    for (spuid, spform) in get_dw_pricing_sps(alg_data.reformulation)
-        for (constrid, constr) in getconstrs(spform)
-            iscuractive(spform, constrid) || continue
-            isexplicit(spform, constrid) || continue
-            initconstraint!(alg_data, constr, spform)
-            push!(constrs_to_stack, (constr, spform))
+    coef_matrix = getcoefmatrix(form)
+    # Updating rhs of master constraints
+    for (varid, val) in solution
+        for (constrid, coef) in coef_matrix[:,varid]
+            iscuractive(form, constrid) || continue
+            isexplicit(form, constrid) || continue
+            getduty(constrid) != MasterConvexityConstr || continue
+            algo.printing && println(
+                "Rhs of constr ", getname(form, constrid), " is changed from ",
+                getcurrhs(form, constrid), " to ", 
+                getcurrhs(form, constrid) - val * coef
+            )
+            setcurrhs!(form, constrid, getcurrhs(form, constrid) - val * coef)
+            update_min_slack!(algo, storage, constrid, form, false, - val * coef)
+            update_max_slack!(algo, storage, constrid, form, false, - val * coef)
+
         end
     end
 
-    # We add to the stack all constraints affected
-    # by the fixing of the local partial sol
-    for constr in constrs_with_modified_rhs
-        if !((constr, master) in constrs_to_stack)
-            push!(constrs_to_stack, (constr, master))
-        end
+    if isa(form, Formulation{DwMaster}) 
+        infeasible = change_subprob_bounds!(algo, storage, form, solution)
+    else    
+        infeasible = false
     end
 
-    # Adding constraints to stack
-    for (constr, form) in constrs_to_stack
-        if (update_min_slack!(alg_data, constr, form, false, 0.0) 
-            || update_max_slack!(alg_data, constr, form, false, 0.0))
+    empty!(storage.local_partial_sol)
+    
+    return infeasible 
+end
+
+function init_new_constraints!(algo::PreprocessAlgorithm, storage::PreprocessingStorage)
+
+    for (constrid, form) in storage.new_constrs
+        iscuractive(form, constrid) || continue
+        isexplicit(form, constrid) || continue
+        getduty(constrid) != MasterConvexityConstr || continue
+        algo.preprocess_subproblems || isa(form, Formulation{DwMaster}) || continue
+
+        storage.nb_inf_sources_for_min_slack[constrid] = 0
+        storage.nb_inf_sources_for_max_slack[constrid] = 0
+        compute_min_slack!(algo, storage, constrid, form) && return true
+        compute_max_slack!(algo, storage, constrid, form) && return true
+    
+        push!(storage.constrs_in_stack, constrid)
+        push!(storage.stack, (constrid, form))
+    end
+    empty!(storage.new_constrs)
+
+    return false
+end
+
+function check_min_slack!(
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, constrid::ConstrId, form::Formulation{Duty}
+    ) where {Duty}
+    slack = storage.cur_min_slack[constrid]
+    if getcursense(form, constrid) != Less && slack > 0.0001
+        if Duty == DwSp && storage.cur_sp_lower_bounds[getuid(form)] == 0
+            # the subproblem becomes infeasible, but, as its lower bound is zero
+            # this does not result in infeasibility of the master
+            change_sp_upper_bound!(algo, storage, form, 0, update_global_var_bounds = true)
+            return false
+        else
             return true
         end
     end
     return false
 end
 
-function initconstraint!(
-    alg_data::PreprocessData, constr::Constraint, form::Formulation
-    )
-    alg_data.constr_in_stack[getid(constr)] = false
-    alg_data.nb_inf_sources_for_min_slack[getid(constr)] = 0
-    alg_data.nb_inf_sources_for_max_slack[getid(constr)] = 0
-    compute_min_slack!(alg_data, constr, form)
-    compute_max_slack!(alg_data, constr, form)
-    return
+function check_max_slack!(
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, constrid::ConstrId, form::Formulation{Duty}
+    ) where {Duty}
+    slack = storage.cur_max_slack[constrid]
+    if getcursense(form, constrid) != Greater && slack < -0.0001
+        if Duty == DwSp && storage.cur_sp_lower_bounds[getuid(form)] == 0
+            # the subproblem becomes infeasible, but, as its lower bound is zero
+            # this does not result in infeasibility of the master
+            change_sp_upper_bound!(algo, storage, form, 0, update_global_var_bounds = true)
+            return false
+        else
+            return true
+        end
+    end
+    return false
 end
 
 function compute_min_slack!(
-        alg_data::PreprocessData, constr::Constraint, form::Formulation
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, constrid::ConstrId, form::Formulation
     )
-    slack = getcurrhs(form, constr)
-    if getduty(getid(constr)) <= AbstractMasterConstr
-        var_filter = (var -> isanOriginalRepresentatives(getduty(getid(var))))
+    slack = getcurrhs(form, constrid)
+    if getduty(constrid) <= AbstractMasterConstr
+        var_filter = (varid -> isanOriginalRepresentatives(getduty(varid)))
     else
-        var_filter = (var -> (getduty(getid(var)) == DwSpPricingVar))
+        var_filter = (varid -> (getduty(varid) == DwSpPricingVar))
     end
     coef_matrix = getcoefmatrix(form)
-    for (varid, coef) in coef_matrix[getid(constr),:]
-        var = getvar(form, varid)
-        if !var_filter(var) 
-            continue
-        end
+    for (varid, coef) in coef_matrix[constrid,:]
+        var_filter(varid) || continue
         if coef > 0
-            cur_ub = getcurub(form, var)
+            cur_ub = getcurub(form, varid)
             if cur_ub == Inf
-                alg_data.nb_inf_sources_for_min_slack[getid(constr)] += 1
+                storage.nb_inf_sources_for_min_slack[constrid] += 1
             else
                 slack -= coef * cur_ub
             end
         else
-            cur_lb = getcurlb(form, var)
+            cur_lb = getcurlb(form, varid)
             if cur_lb == -Inf
-                alg_data.nb_inf_sources_for_min_slack[getid(constr)] += 1
+                storage.nb_inf_sources_for_min_slack[constrid] += 1
             else
                 slack -= coef * cur_lb
             end
         end
     end
-    alg_data.cur_min_slack[getid(constr)] = slack
-    return
+    algo.printing && println(
+        "Min slack for constr ", getname(form, constrid), " is initialized to ", slack
+    )
+    storage.cur_min_slack[constrid] = slack
+    return check_min_slack!(algo, storage, constrid, form)
 end
 
 function compute_max_slack!(
-        alg_data::PreprocessData, constr::Constraint, form::Formulation
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, constrid::ConstrId, form::Formulation
     )
-    slack = getcurrhs(form, constr)
-    if getduty(getid(constr)) <= AbstractMasterConstr
-        var_filter = (var -> isanOriginalRepresentatives(getduty(getid(var))))
+    slack = getcurrhs(form, constrid)
+    if getduty(constrid) <= AbstractMasterConstr
+        var_filter = (varid -> isanOriginalRepresentatives(getduty(varid)))
     else
-        var_filter = (var -> (getduty(getid(var)) == DwSpPricingVar))
+        var_filter = (varid -> (getduty(varid) == DwSpPricingVar))
     end
     coef_matrix = getcoefmatrix(form)
-    for (varid, coef) in coef_matrix[getid(constr),:]
-        var = getvar(form, varid)
-        if !var_filter(var) 
-            continue
-        end
+    for (varid, coef) in coef_matrix[constrid,:]
+        !var_filter(varid) || continue
         if coef > 0
-            cur_lb = getcurlb(form, var)
+            cur_lb = getcurlb(form, varid)
             if cur_lb == -Inf
-                alg_data.nb_inf_sources_for_max_slack[getid(constr)] += 1
+                alg_data.nb_inf_sources_for_max_slack[constrid] += 1
             else
-                slack -= coef*cur_lb
+                slack -= coef * cur_lb
             end
         else
-            cur_ub = getcurub(form, var)
+            cur_ub = getcurub(form, varid)
             if cur_ub == Inf
-                alg_data.nb_inf_sources_for_max_slack[getid(constr)] += 1
+                alg_data.nb_inf_sources_for_max_slack[constrid] += 1
             else
-                slack -= coef*cur_ub
+                slack -= coef * cur_ub
             end
         end
     end
-    alg_data.cur_max_slack[getid(constr)] = slack
-    return
+    algo.printing && println(
+        "Max slack for constr ", getname(form, constrid), " is initialized to ", slack
+    )
+    storage.cur_max_slack[constrid] = slack
+    return check_max_slack!(algo, storage, constrid, form)
 end
 
 function update_max_slack!(
-        alg_data::PreprocessData, constr::Constraint, form::Formulation,
-        var_was_inf_source::Bool, delta::Float64
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, constrid::ConstrId, 
+    form::Formulation, var_was_inf_source::Bool, delta::Float64
     )
-    alg_data.cur_max_slack[getid(constr)] += delta
+
+    algo.printing && println(
+        "Max slack for constr ", getname(form, constrid), " is changed from ",
+        storage.cur_max_slack[constrid], " to ", storage.cur_max_slack[constrid] + delta
+    )
+    storage.cur_max_slack[constrid] += delta
     if var_was_inf_source
-        alg_data.nb_inf_sources_for_max_slack[getid(constr)] -= 1
+        storage.nb_inf_sources_for_max_slack[constrid] -= 1
     end
 
-    nb_inf_sources = alg_data.nb_inf_sources_for_max_slack[getid(constr)]
-    sense = getcursense(form, constr)
+    nb_inf_sources = storage.nb_inf_sources_for_max_slack[constrid]
+    sense = getcursense(form, constrid)
     if nb_inf_sources == 0
-        if (sense != Greater) && alg_data.cur_max_slack[getid(constr)] < -0.0001
+        if check_max_slack!(algo, storage, constrid, form)
             return true
-        elseif (sense == Greater) && alg_data.cur_max_slack[getid(constr)] <= -0.0001
-            # add_to_preprocessing_list(alg, constr)
+        elseif (sense == Greater) && storage.cur_max_slack[constrid] <= -0.0001
+            if (constrid,form) ∉ storage.preprocessed_constrs
+                push!(storage.preprocessed_constrs, (constrid,form))
+            end
             return false
         end
     end
-    if nb_inf_sources <= 1
-        if sense != Greater
-            add_to_stack!(alg_data, constr, form)
-        end
+    if nb_inf_sources <= 1 && sense != Greater
+        add_to_stack!(storage, constrid, form)
     end
     return false
 end
 
 function update_min_slack!(
-        alg_data::PreprocessData, constr::Constraint, form::Formulation,
-        var_was_inf_source::Bool, delta::Float64
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, constrid::ConstrId, 
+    form::Formulation, var_was_inf_source::Bool, delta::Float64
     )
-    alg_data.cur_min_slack[getid(constr)] += delta
+    algo.printing && println(
+        "Min slack for constr ", getname(form, constrid), " is changed from ",
+        storage.cur_min_slack[constrid], " to ", storage.cur_min_slack[constrid] + delta
+    )
+    storage.cur_min_slack[constrid] += delta
     if var_was_inf_source
-        alg_data.nb_inf_sources_for_min_slack[getid(constr)] -= 1
+        storage.nb_inf_sources_for_min_slack[constrid] -= 1
     end
 
-    nb_inf_sources = alg_data.nb_inf_sources_for_min_slack[getid(constr)]
-    sense = getcursense(form, constr)
+    nb_inf_sources = storage.nb_inf_sources_for_min_slack[constrid]
+    sense = getcursense(form, constrid)
     if nb_inf_sources == 0
-        if (sense != Less) && alg_data.cur_min_slack[getid(constr)] > 0.0001
+        if check_min_slack!(algo, storage, constrid, form)
             return true
-        elseif (sense == Less) && alg_data.cur_min_slack[getid(constr)] >= 0.0001
-            #add_to_preprocessing_list(alg, constr)
+        elseif (sense == Less) && storage.cur_min_slack[constrid] >= 0.0001
+            if (constrid,form) ∉ storage.preprocessed_constrs
+                push!(storage.preprocessed_constrs, (constrid,form))
+            end
             return false
         end
     end
-    if nb_inf_sources <= 1
-        if sense != Less
-            add_to_stack!(alg_data, constr, form)
-        end
+    if nb_inf_sources <= 1 && sense != Less
+        add_to_stack!(storage, constrid, form)
     end
     return false
 end
 
-function add_to_preprocessing_list!(alg_data::PreprocessData, var::Variable)
-    if !(var in alg_data.preprocessed_vars)
-        push!(alg_data.preprocessed_vars, var)
-    end
-    return
-end
-
-function add_to_preprocessing_list!(
-       alg_data::PreprocessData, constr::Constraint
-    )
-    if !(constr in alg_data.preprocessed_constrs)
-        push!(alg_data.preprocessed_constrs, constr)
-    end
-    return
-end
-
-function add_to_stack!(
-        alg_data::PreprocessData, constr::Constraint, form::Formulation
-    )
-    if !alg_data.constr_in_stack[getid(constr)]
-        push!(alg_data.stack, (constr, form))
-        alg_data.constr_in_stack[getid(constr)] = true
-    end
-    return
-end
-
 function update_lower_bound!(
-        alg_data::PreprocessData, var::Variable, form::Formulation,
-        new_lb::Float64, check_monotonicity::Bool = true
-    )
-    cur_lb = getcurlb(form, var)
-    cur_ub = getcurub(form, var)
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, var::Variable, 
+    form::Formulation{Duty}, new_lb::Float64; check_monotonicity::Bool = true
+    ) where {Duty}
     varid = getid(var)
-    if new_lb > cur_lb || !check_monotonicity
-        if new_lb > cur_ub
+    if Duty == DwSp
+        if !algo.preprocess_subproblems || storage.cur_sp_upper_bounds[getuid(form)] == 0
+            return false
+        end
+    end
+    cur_lb = getcurlb(form, varid)
+    cur_ub = getcurub(form, varid)
+
+    check_monotonicity && new_lb <= cur_lb && return false
+
+    algo.printing && println(IOContext(stdout, :compact => true),
+        "Lower bound of var ", getname(form, varid), " of type ", getduty(varid), 
+        " in ", form, " is changed from ", cur_lb, " to ", new_lb
+    )
+
+    if new_lb > cur_ub 
+        if Duty == DwSp && storage.cur_sp_upper_bounds[getuid(form)] == 0
+            change_sp_upper_bound!(algo, storage, form, 0, update_global_var_bounds = true)
+            return false
+        else    
             return true
         end
+    end
 
-        diff = cur_lb == -Inf ? -new_lb : cur_lb - new_lb
-        coef_matrix = getcoefmatrix(form)
-        for (constrid, coef) in coef_matrix[:, varid]
-            iscuractive(form, constrid) || continue
-            isexplicit(form, constrid) || continue
-            status = false
-            if coef < 0 
-                status = update_min_slack!(
-                    alg_data, getconstr(form, constrid),
-                    form, cur_lb == -Inf , diff * coef
-                )
-            else
-                status = update_max_slack!(
-                    alg_data, getconstr(form, constrid),
-                    form, cur_lb == -Inf , diff * coef
-                )
-            end
-            if status 
-                return true
-            end
-        end
-        alg_data.printing && println(
-            "updating lb of var ", getname(form, var), " from ", cur_lb, " to ",
-            new_lb, " duty ", getduty(varid)
-        )
-        setcurlb!(form, var, new_lb)
-        add_to_preprocessing_list!(alg_data, var)
-
-        # Now we update bounds of clones
-        if getduty(varid) == MasterRepPricingVar 
-            subprob = find_owner_formulation(form.parent_formulation, var)
-            (sp_lb, sp_ub) = alg_data.cur_sp_bounds[getuid(subprob)]
-            clone_in_sp = getvar(subprob, varid)
-            if update_lower_bound!(
-                    alg_data, clone_in_sp, subprob,
-                    getcurlb(form, var) - (max(sp_ub, 1) - 1) * getcurub(subprob, clone_in_sp)
-                )
-                return true
-            end
-        elseif getduty(varid) == DwSpPricingVar
-            master = form.parent_formulation
-            (sp_lb, sp_ub) = alg_data.cur_sp_bounds[getuid(form)]
-            clone_in_master = getvar(master, varid)
-            if update_lower_bound!(
-                    alg_data, clone_in_master, master, getcurlb(form, varid) * sp_lb
-                )
-                return true
-            end
-            new_ub_in_sp = (
-                getcurub(master, clone_in_master) - (max(sp_lb, 1) - 1) * getcurlb(form, varid)
+    diff = cur_lb == -Inf ? -new_lb : cur_lb - new_lb
+    coef_matrix = getcoefmatrix(form)
+    for (constrid, coef) in coef_matrix[:, varid]
+        iscuractive(form, constrid) || continue
+        isexplicit(form, constrid) || continue
+        getduty(constrid) != MasterConvexityConstr || continue
+        infeasible = false
+        if coef < 0 
+            infeasible = update_min_slack!(
+                algo, storage, constrid, form, cur_lb == -Inf, diff * coef
             )
-            if update_upper_bound!(alg_data, var, form, new_ub_in_sp)
-                return true
-            end
+        else
+            infeasible = update_max_slack!(
+                algo, storage, constrid, form, cur_lb == -Inf , diff * coef
+            )
+        end
+        infeasible && return true
+    end
+    
+    setcurlb!(form, varid, new_lb)
+    if Duty == DwSp && (varid,form) ∉ storage.sp_vars_with_changed_bounds
+        push!(storage.sp_vars_with_changed_bounds, (varid,form))
+    end
+
+    # Now we update bounds of clones
+    if getduty(varid) == MasterRepPricingVar 
+        subprob = find_owner_formulation(form.parent_formulation, var)
+        cur_sp_ub = storage.cur_sp_upper_bounds[getuid(subprob)]
+        if update_lower_bound!(
+                algo, storage, getvar(subprob, varid), subprob,
+                getcurlb(form, varid) - (max(cur_sp_ub, 1) - 1) * getcurub(subprob, varid)
+            )
+            return true
+        end
+    elseif getduty(varid) == DwSpPricingVar
+        master = form.parent_formulation
+        cur_sp_lb = storage.cur_sp_lower_bounds[getuid(form)]
+        mastervar = getvar(master, varid)
+        if update_lower_bound!(
+                algo, storage, mastervar, master, getcurlb(form, varid) * cur_sp_lb
+            )
+            return true
+        end
+        new_ub_in_sp = (
+            getcurub(master, varid) - (max(cur_sp_lb, 1) - 1) * getcurlb(form, varid)
+        )
+        if update_upper_bound!(algo, storage, mastervar, form, new_ub_in_sp)
+            return true
         end
     end
+
     return false
 end
 
 function update_upper_bound!(
-        alg_data::PreprocessData, var::Variable, form::Formulation,
-        new_ub::Float64, check_monotonicity::Bool = true
-    )
-    cur_lb = getcurlb(form, var)
-    cur_ub = getcurub(form, var)
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, var::Variable, 
+    form::Formulation{Duty}, new_ub::Float64
+    ) where {Duty}
     varid = getid(var)
-    if new_ub < cur_ub || !check_monotonicity
-        if new_ub < cur_lb
+    if Duty == DwSp
+        if !algo.preprocess_subproblems || storage.cur_sp_upper_bounds[getuid(form)] == 0
+            return false
+        end
+    end
+    cur_lb = getcurlb(form, varid)
+    cur_ub = getcurub(form, varid)
+    new_ub >= cur_ub  && return false
+    
+    algo.printing && println(IOContext(stdout, :compact => true),
+       "Upper bound of var ", getname(form, varid), " of type ", getduty(varid), 
+        " in ", form, " is changed from ", cur_ub, " to ", new_ub, 
+    )
+
+    if new_ub < cur_lb 
+        if Duty == DwSp && storage.cur_sp_upper_bounds[getuid(form)] == 0
+            change_sp_upper_bound!(algo, storage, form, 0, update_global_var_bounds = true)
+            return false
+        else    
             return true
         end
-        
-        diff = cur_ub == Inf ? -new_ub : cur_ub - new_ub
-        coef_matrix = getcoefmatrix(form)
-        for (constrid, coef) in coef_matrix[:, varid]
-            iscuractive(form, constrid) || continue
-            isexplicit(form, constrid) || continue
-            status = false
-            if coef > 0 
-                status = update_min_slack!(
-                    alg_data, getconstr(form, constrid),
-                    form, cur_ub == Inf , diff * coef
-                )
-            else
-                status = update_max_slack!(
-                    alg_data, getconstr(form, constrid),
-                    form, cur_ub == Inf , diff * coef
-                )
-            end
-            if status
-                return true
-            end
-        end
-        if alg_data.printing
-            println(
-            "updating ub of var ", getname(form, var), " from ", cur_ub,
-            " to ", new_ub, " duty ", getduty(varid)
-            )
-        end
-        setcurub!(form, varid, new_ub)
-        add_to_preprocessing_list!(alg_data, var)
-        
-        # Now we update bounds of clones
-        if getduty(varid) == MasterRepPricingVar 
-            subprob = find_owner_formulation(form.parent_formulation, var)
-            (sp_lb, sp_ub) = alg_data.cur_sp_bounds[getuid(subprob)]
-            clone_in_sp = getvar(subprob, varid)
-            if update_upper_bound!(
-                alg_data, clone_in_sp, subprob,
-                getcurub(form, varid) - (max(sp_lb, 1) - 1) * getcurlb(subprob, clone_in_sp)
-                )
-                return true
-            end
-        elseif getduty(varid) == DwSpPricingVar
-            master = form.parent_formulation
-            (sp_lb, sp_ub) = alg_data.cur_sp_bounds[getuid(form)]
-            clone_in_master = getvar(master, varid)
-            if update_upper_bound!(
-                alg_data, clone_in_master, master, getcurub(form, varid) * sp_ub
-                )
-                return true
-            end
-            new_lb_in_sp = (
-            getcurlb(master, clone_in_master) - (max(sp_ub, 1) - 1) * getcurub(form, varid)
-            )
-            if update_lower_bound!(alg_data, var, form, new_lb_in_sp)
-                return true
-            end
-        end
     end
-    return false
-end
 
-function adjust_bound(form::Formulation, var::Variable, bound::Float64, is_upper::Bool)
-    if getcurkind(form, var) != Continuous 
-        bound = is_upper ? floor(bound) : ceil(bound)
+    diff = cur_ub == Inf ? -new_ub : cur_ub - new_ub
+    coef_matrix = getcoefmatrix(form)
+    for (constrid, coef) in coef_matrix[:, varid]
+        iscuractive(form, constrid) || continue
+        isexplicit(form, constrid) || continue
+        getduty(constrid) != MasterConvexityConstr || continue
+        infeasible = false
+        if coef > 0 
+            infeasible = update_min_slack!(
+                algo, storage, constrid, form, cur_ub == Inf , diff * coef
+            )
+        else
+            infeasible = update_max_slack!(
+                algo, storage, constrid, form, cur_ub == Inf , diff * coef
+            )
+        end
+        infeasible && return true
     end
-    return bound
+
+    setcurub!(form, varid, new_ub)
+    if Duty == DwSp && (varid,form) ∉ storage.sp_vars_with_changed_bounds
+        push!(storage.sp_vars_with_changed_bounds, (varid,form))
+    end
+    
+    # Now we update bounds of clones
+    if getduty(varid) == MasterRepPricingVar 
+        subprob = find_owner_formulation(form.parent_formulation, var)
+        cur_sp_lb = storage.cur_sp_lower_bounds[getuid(subprob)]
+        if update_upper_bound!(
+            algo, storage, getvar(subprob, varid), subprob,
+            getcurub(form, varid) - (max(cur_sp_lb, 1) - 1) * getcurlb(subprob, varid)
+            )
+            return true
+        end
+    elseif getduty(varid) == DwSpPricingVar
+        master = form.parent_formulation
+        cur_sp_ub = storage.cur_sp_upper_bounds[getuid(form)]
+        clone_var_in_master = getvar(master, varid)
+        if update_upper_bound!(
+            algo, storage, clone_var_in_master, master, getcurub(form, varid) * cur_sp_ub
+            )
+            return true
+        end
+        new_lb_in_sp = (
+            getcurlb(master, varid) - (max(cur_sp_ub, 1) - 1) * getcurub(form, varid)
+            )
+        if update_lower_bound!(algo, storage, clone_var_in_master, master, new_lb_in_sp)
+            return true
+        end
+    end
+
+    return false
 end
 
 function compute_new_bound(
@@ -626,104 +726,135 @@ function compute_new_bound(
     return bound
 end
 
-function compute_new_var_bound(
-    alg_data::PreprocessData, var::Variable, form::Formulation, 
-    cur_lb::Float64, cur_ub::Float64, coef::Float64, constr::Constraint
-    )
-    constrid = getid(constr)
-    if coef > 0 && getcursense(form, constrid) == Less
-        is_ub = true
-        return (is_ub, compute_new_bound(
-        alg_data.nb_inf_sources_for_max_slack[constrid],
-        alg_data.cur_max_slack[constrid], -coef * cur_lb, Inf, coef
-        ))
-    elseif coef > 0 && getcursense(form, constrid) != Less
-        is_ub = false
-        return (is_ub, compute_new_bound(
-        alg_data.nb_inf_sources_for_min_slack[constrid],
-        alg_data.cur_min_slack[constrid], -coef * cur_ub, -Inf, coef
-        ))
-    elseif coef < 0 && getcursense(form, constrid) != Greater
-        is_ub = false
-        return (is_ub, compute_new_bound(
-        alg_data.nb_inf_sources_for_max_slack[constrid],
-        alg_data.cur_max_slack[constrid], -coef * cur_ub, -Inf
-        ))
-    else
-        is_ub = true
-        return (is_ub, compute_new_bound(
-        alg_data.nb_inf_sources_for_min_slack[constrid], 
-        alg_data.cur_min_slack[constrid], -coef * cur_lb, Inf
-        ))
-    end
-end
-
 function strengthen_var_bounds_in_constr!(
-    alg_data::PreprocessData, constr::Constraint, form::Formulation
-    )
-    constrid = getid(constr)
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, constrid::ConstrId, form::Formulation{Duty}
+    ) where {Duty}
+    if Duty == DwSp
+        if !algo.preprocess_subproblems || storage.cur_sp_upper_bounds[getuid(form)] == 0
+            return false
+        end
+    end
+
     if getduty(constrid) <= AbstractMasterConstr
-        var_filter =  (var -> isanOriginalRepresentatives(getduty(getid(var))))
+        var_filter = (varid -> isanOriginalRepresentatives(getduty(varid)))
     else
-        var_filter = (var -> (getduty(getid(var)) == DwSpPricingVar))
+        var_filter = (varid -> (getduty(varid) == DwSpPricingVar))
     end
     coef_matrix = getcoefmatrix(form)
     for (varid, coef) in coef_matrix[constrid,:]
-        var = getvar(form, varid)
-        if !var_filter(var) 
-            continue
+        var_filter(varid) || continue
+
+        if coef > 0 && getcursense(form, constrid) == Less
+            new_bound_is_upper = true
+            new_bound = compute_new_bound(
+                    storage.nb_inf_sources_for_max_slack[constrid],
+                    storage.cur_max_slack[constrid], -coef * getcurlb(form, varid), Inf, coef
+                    )
+        elseif coef > 0 && getcursense(form, constrid) != Less
+            new_bound_is_upper = false
+            new_bound = compute_new_bound(
+                    storage.nb_inf_sources_for_min_slack[constrid],
+                    storage.cur_min_slack[constrid], -coef * getcurub(form, varid), -Inf, coef
+                    )
+        elseif coef < 0 && getcursense(form, constrid) != Greater
+            new_bound_is_upper = false
+            new_bound = compute_new_bound(
+                    storage.nb_inf_sources_for_max_slack[constrid],
+                    storage.cur_max_slack[constrid], -coef * getcurub(form, varid), -Inf, coef
+                    )
+        else
+            new_bound_is_upper = true
+            new_bound = compute_new_bound(
+                    storage.nb_inf_sources_for_min_slack[constrid], 
+                    storage.cur_min_slack[constrid], -coef * getcurlb(form, varid), Inf, coef
+                    )
         end
-        (is_ub, bound) = compute_new_var_bound(
-        alg_data, var, form, getcurlb(form, varid), getcurub(form, varid), coef, constr
-        )
-        if !isinf(bound)
-            bound = adjust_bound(form, var, bound, is_ub)
-            status = false
-            if is_ub
-                status = update_upper_bound!(alg_data, var, form, bound)
+    
+        if !isinf(new_bound)
+            if getcurkind(form, varid) != Continuous 
+                new_bound = new_bound_is_upper ? floor(new_bound) : ceil(new_bound)
+            end
+            infeasible = false
+            if new_bound_is_upper
+                infeasible = update_upper_bound!(algo, storage, getvar(form, varid), form, new_bound)
             else
-                status = update_lower_bound!(alg_data, var, form, bound)
+                infeasible = update_lower_bound!(algo, storage, getvar(form, varid), form, new_bound)
             end
-            if status
-                return true
-            end
+            infeasible && return true
         end
     end
     return false
 end
 
-function propagation!(alg_data::PreprocessData)
-    while !isempty(alg_data.stack)
-        (constr, form) = pop!(alg_data.stack)
-        alg_data.constr_in_stack[getid(constr)] = false
+function propagation!(algo::PreprocessAlgorithm, storage::PreprocessingStorage)
+    while !isempty(storage.stack)
+        (constrid, form) = pop!(storage.stack)
+        delete!(storage.constrs_in_stack, constrid)
         
-        if alg_data.printing
-            println("constr ", getname(form, constr), " ", typeof(constr), " popped")
-            println(
-                "rhs ", getcurrhs(form, constr), " max: ",
-                alg_data.cur_max_slack[getid(constr)], " min: ",
-                alg_data.cur_min_slack[getid(constr)]
-            )
-        end
-        if strengthen_var_bounds_in_constr!(alg_data, constr, form)
+        # if algo.printing
+        #     println("constr ", getname(form, constr), " ", typeof(constr), " popped")
+        #     println(
+        #         "rhs ", getcurrhs(form, constr), " max: ",
+        #         alg_data.cur_max_slack[getid(constr)], " min: ",
+        #         alg_data.cur_min_slack[getid(constr)]
+        #     )
+        # end
+        if strengthen_var_bounds_in_constr!(algo, storage, constrid, form)
+
             return true
         end
     end
     return false
 end
 
-function forbid_infeasible_columns!(alg_data::PreprocessData)
-    master = getmaster(alg_data.reformulation)
-    primal_sp_sols = getprimalsolmatrix(getmaster(alg_data.reformulation))
-    for var in alg_data.preprocessed_vars
-        varid = getid(var)
-        if getduty(varid) == DwSpPricingVar
-            for (col_id, coef) in primal_sp_sols[varid,:]
-                if !(getcurlb(master, varid) <= coef <= getcurub(master, varid)) # TODO ; get the subproblem...
-                    setcurub!(master, getvar(master, col_id), 0.0)
-                end
+# TO DO : for the moment, this is not the most efficient implementation
+# a more efficient one would involve storage.sp_vars_with_changed_bounds
+# and we need to quickly access columns generated by a subproblem (to access them
+# if a lower bound of sp variables becomes larger than zero)
+function forbid_infeasible_columns!(
+    algo::PreprocessAlgorithm, storage::PreprocessingStorage, master::Formulation{DwMaster}
+    )
+    num_deactivated_columns = 0
+    for (col_id, col) in getvars(master)
+        iscuractive(master, col_id) || continue
+        getduty(col_id) <= MasterCol || continue
+        
+        spuid = getoriginformuid(col_id)
+        if storage.cur_sp_upper_bounds[spuid] == 0
+            deactivate!(master,col_id)
+            num_deactivated_columns += 1
+            continue
+        end
+
+        spform = get_dw_pricing_sps(master.parent_formulation)[spuid]
+        for (repid, repval) in @view getprimalsolmatrix(spform)[:, col_id]
+            if !(getcurlb(spform, repid) <= repval <= getcurub(spform, repid))
+                deactivate!(master,col_id)
+                num_deactivated_columns += 1
+                continue
             end
         end
     end
+
+    if num_deactivated_columns > 0
+        @logmsg LogLevel(0) "Preprocessing deactivated $num_deactivated_columns columns"
+    end
+
+    return
+end
+
+function remove_preprocessed_constraints(algo::PreprocessAlgorithm, storage::PreprocessingStorage)
+
+    num_deactivated_constraints = 0
+    for (constrid, form) in storage.preprocessed_constrs
+        iscuractive(form, constrid) || continue
+        deactivate!(form, constrid)
+        num_deactivated_constraints += 1
+    end
+
+    if num_deactivated_constraints > 0
+        @logmsg LogLevel(0) "Preprocessing deactivated $num_deactivated_constraints constraints"
+    end
+
     return
 end

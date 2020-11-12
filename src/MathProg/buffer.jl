@@ -30,8 +30,8 @@ end
 """
     FormulationBuffer()
 
-A `FormulationBuffer` stores all changes done to a `Formulation` `f` since last call to `optimize!(f)`.
-When function `optimize!(f)` is called, the optimizer is synched with all changes in FormulationBuffer
+A `FormulationBuffer` stores all changes done to a `Formulation` `f` since last call to `sync_solver!`.
+When function `sync_solver!` is called, the optimizer is synched with all changes in FormulationBuffer
 
 When `f` is modified, such modification should not be passed directly to its optimizer, but instead should be passed to `f.buffer`.
 

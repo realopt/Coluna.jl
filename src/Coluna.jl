@@ -14,6 +14,11 @@ global const MOI = MathOptInterface
 global const MOIU = MathOptInterface.Utilities
 global const TO = TimerOutputs
 
+### Default parameters values
+global const DEF_OPTIMALITY_ATOL = 1e-5
+global const DEF_OPTIMALITY_RTOL = 1e-9
+###
+
 # submodules
 export ColunaBase, MathProg, Algorithm
 
@@ -23,7 +28,7 @@ export Parameters, DefaultOptimizer
 # Base functions for which we define more methods in Coluna
 import Base: isempty, hash, isequal, length, iterate, getindex, lastindex,
     getkey, delete!, setindex!, haskey, copy, promote_rule, convert, isinteger,
-    push!, filter, diff
+    push!, filter, diff, hcat
 
 include("interface.jl")
 include("parameters.jl")

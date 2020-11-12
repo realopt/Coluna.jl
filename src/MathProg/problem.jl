@@ -33,8 +33,8 @@ get_reformulation(m::Problem) = m.re_formulation
 
 set_default_optimizer_builder!(p::Problem, default_opt_builder) = p.default_optimizer_builder = default_opt_builder
 
-set_initial_primal_bound!(p::Problem, value::Float64) = p.initial_primal_bound = value
-set_initial_dual_bound!(p::Problem, value::Float64) = p.initial_dual_bound = value
+set_initial_primal_bound!(p::Problem, value::Real) = p.initial_primal_bound = value
+set_initial_dual_bound!(p::Problem, value::Real) = p.initial_dual_bound = value
 
 function get_initial_primal_bound(p::Problem)
     if p.original_formulation === nothing

@@ -22,14 +22,16 @@ function generalized_assignment_tests()
         )
 
         model, x, dec = CLD.GeneralizedAssignment.model(data, coluna)
-        BD.objectiveprimalbound!(model, 100.0)
-        BD.objectivedualbound!(model, 0.0)
+        BD.objectiveprimalbound!(model, 100)
+        BD.objectivedualbound!(model, 0)
 
         JuMP.optimize!(model)
 
         @test JuMP.objective_value(model) ≈ 75.0
         @test JuMP.termination_status(model) == MOI.OPTIMAL
         @test CLD.GeneralizedAssignment.print_and_check_sol(data, model, x)
+        @test MOI.get(model, MOI.NumberOfVariables()) == length(x)
+        @test MOI.get(model, MOI.SolverName()) == "Coluna"
     end
 
     @testset "gap - JuMP/MOI modeling" begin
@@ -61,7 +63,7 @@ function generalized_assignment_tests()
         branching = ClA.StrongBranching()
         push!(branching.phases, ClA.BranchingPhase(5, ClA.RestrMasterLPConquer()))
         push!(branching.phases, ClA.BranchingPhase(1, conquer_with_small_cleanup_threshold))
-        push!(branching.rules, ClA.PrioritisedBranchingRule(1.0, 1.0, ClA.VarBranchingRule()))
+        push!(branching.rules, ClA.PrioritisedBranchingRule(ClA.VarBranchingRule(), 1.0, 1.0))
 
         coluna = JuMP.optimizer_with_attributes(
             CL.Optimizer,
@@ -180,7 +182,7 @@ function generalized_assignment_tests()
             Coluna.Optimizer,
             "params" => CL.Params(solver = ClA.TreeSearchAlgorithm(
                 conqueralg = ClA.ColCutGenConquer(
-                    colgen = ClA.ColumnGeneration(optimality_tol = 1e-6, smoothing_stabilization = 0.5)
+                    colgen = ClA.ColumnGeneration(opt_rtol = 1e-4, smoothing_stabilization = 0.5)
                 )
             )),
             "default_optimizer" => GLPK.Optimizer

@@ -137,7 +137,7 @@ function test_random_gap_instance()
                 apply_random_branching_constraint!(modified_problem, x, br_m, br_j, leq)
                 JuMP.optimize!(modified_problem)
 
-                @test JuMP.termination_status(problem) == MOI.INFEASIBLE
+                @test JuMP.termination_status(modified_problem) == MOI.INFEASIBLE
                 nb_prep_vars += 1
             end
         end

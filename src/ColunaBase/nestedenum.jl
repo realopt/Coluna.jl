@@ -99,7 +99,7 @@ function _build_print_expression(names, values)
     push!(print_expr.args, :(Base.print(io::IO, obj::$(root_name)))) #signature
 
     # build the if list in reverse order
-    prev_cond = :(print(io, "UNKOWN_DUTY"))
+    prev_cond = :(print(io, "UNKNOWN_DUTY"))
     for i in length(names):-1:2
         head = (i == 2) ? :if : :elseif
         msg = string(names[i])
@@ -134,7 +134,6 @@ function _assign_values_to_items(expr)
     return names, values
 end
 
-
 """
 
     @nestedenum block_expression
@@ -143,23 +142,45 @@ Create a `NestedEnum` subtype such as :
 
 # Example
 
-```jldoctest
-    @nestedenum begin 
-        Root
-        ChildA <= Root
-            GrandChildA1 <= ChildA
-            GrandChildA2 <= ChildA
-        ChildB <= Root
-        ChildC <= Root
-    end
+```@meta
+DocTestSetup = quote
+    using Coluna
+end
 ```
 
-Create a nested enumeration with name `Root` and items `ChildA`, 
-`GrandChildA1`, `GrandChildA2`, `ChildB`, and `ChildC`.
+```jldoctest nestedexample
+Coluna.ColunaBase.@nestedenum begin 
+    TypeOfItem
+    ItemA <= TypeOfItem
+        ChildA1 <= ItemA
+            GrandChildA11 <= ChildA1
+            GrandChildA12 <= ChildA1
+        ChildA2 <= ItemA
+    ItemB <= TypeOfItem
+    ItemC <= TypeOfItem
+end
+
+# output
+
+```
+
+Create a nested enumeration with items `ItemA`, `ChildA1`, `ChildA2`, `GrandChildA11`, 
+`GrandChildA12`, `ItemB`, and `ItemC` of type `TypeOfItem`.
 The operator `<=` indicates the parent of the item.
-In this example, `Root` is parent of `ChildA`, `ChildB`, and `ChildC`;
-`Root` is grand-parent of `GrandChildA1` and `GrandChildA2`;
-`ChildA` is parent of `GrandChildA1` and `GrandChildA2`.
+
+```jldoctest nestedexample
+julia> GrandChildA11 <= ItemA
+true
+```
+
+```jldoctest nestedexample
+julia> GrandChildA11 <= ItemC
+false
+```
+
+```@meta
+DocTestSetup = nothing
+```
 """
 macro nestedenum(expr)
     return _nestedenum(expr, false)
