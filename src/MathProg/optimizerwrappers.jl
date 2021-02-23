@@ -43,11 +43,11 @@ function sync_solver!(optimizer::MoiOptimizer, f::Formulation)
     matrix = getcoefmatrix(f)
 
     # Remove constrs
-    @logmsg LogLevel(-2) string("Removing constraints")
+    @logmsg LogLevel(-4) string("Removing constraints")
     remove_from_optimizer!(buffer.constr_buffer.removed, f)
 
     # Remove vars
-    @logmsg LogLevel(-2) string("Removing variables")
+    @logmsg LogLevel(-4) string("Removing variables")
     remove_from_optimizer!(buffer.var_buffer.removed, f)
 
     # Add vars
@@ -60,7 +60,7 @@ function sync_solver!(optimizer::MoiOptimizer, f::Formulation)
     # Add constrs
     for constr_id in buffer.constr_buffer.added
         constr = getconstr(f, constr_id)
-        @logmsg LogLevel(-2) string("Adding constraint ", getname(f, constr))
+        @logmsg LogLevel(-4) string("Adding constraint ", getname(f, constr))
         add_to_optimizer!(f, constr, (f, constr) -> iscuractive(f, constr) && isexplicit(f, constr))
     end
 
@@ -88,7 +88,7 @@ function sync_solver!(optimizer::MoiOptimizer, f::Formulation)
     # Update variable kind
     for id in buffer.changed_var_kind
         (id in buffer.var_buffer.added || id in buffer.var_buffer.removed) && continue
-        @logmsg LogLevel(-3) "Changing kind of variable " getname(f, id)
+        @logmsg LogLevel(-4) "Changing kind of variable " getname(f, id)
         @logmsg LogLevel(-4) string("New kind is ", getcurkind(f, id))
         enforce_kind_in_optimizer!(f, getvar(f,id))
     end
@@ -96,7 +96,7 @@ function sync_solver!(optimizer::MoiOptimizer, f::Formulation)
     # Update constraint rhs
     for id in buffer.changed_rhs
         (id in buffer.constr_buffer.added || id in buffer.constr_buffer.removed) && continue
-        @logmsg LogLevel(-3) "Changing rhs of constraint " getname(f, id)
+        @logmsg LogLevel(-4) "Changing rhs of constraint " getname(f, id)
         @logmsg LogLevel(-4) string("New rhs is ", getcurrhs(f, id))
         update_constr_rhs_in_optimizer!(f, getconstr(f, id))
     end
@@ -120,7 +120,7 @@ function sync_solver!(optimizer::MoiOptimizer, f::Formulation)
         (c_id in buffer.constr_buffer.removed || v_id in buffer.var_buffer.removed) && continue
         c = getconstr(f, c_id)
         v = getvar(f, v_id)
-        @logmsg LogLevel(-2) string("Setting matrix coefficient: (", getname(f, c), ",", getname(f, v), ") = ", coeff)
+        @logmsg LogLevel(-5) string("Setting matrix coefficient: (", getname(f, c), ",", getname(f, v), ") = ", coeff)
         update_constr_member_in_optimizer!(optimizer, c, v, coeff)
     end
     _reset_buffer!(f)

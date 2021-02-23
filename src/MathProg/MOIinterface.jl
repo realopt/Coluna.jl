@@ -216,8 +216,11 @@ getreducedcost(form::Formulation, varid::VarId) = _getreducedcost(form, getoptim
 function get_primal_solutions(form::F, optimizer::MoiOptimizer) where {F <: Formulation}
     inner = getinner(optimizer)
     nb_primal_sols = MOI.get(inner, MOI.ResultCount())
+    @logmsg LogLevel(-3) "Nb of primal solutions: $nb_primal_sols"
+    @logmsg LogLevel(-3) "Termination status : $(MOI.get(inner, MOI.TerminationStatus()))."
     solutions = PrimalSolution{F}[]
     for res_idx in 1:nb_primal_sols
+        @logmsg LogLevel(-3) "Primal status of $res_idx is $(MOI.get(inner, MOI.PrimalStatus(res_idx)))"
         if MOI.get(inner, MOI.PrimalStatus(res_idx)) != MOI.FEASIBLE_POINT
             continue
         end
@@ -233,7 +236,7 @@ function get_primal_solutions(form::F, optimizer::MoiOptimizer) where {F <: Form
             solcost += val * getcurcost(form, id)
             val = round(val, digits = Coluna.TOL_DIGITS)
             if abs(val) > Coluna.TOL
-                @logmsg LogLevel(-4) string("Var ", var.name , " = ", val)
+                @logmsg LogLevel(-3) string("Var ", var.name , " = ", val)
                 push!(solvars, id)
                 push!(solvals, val)
             end
@@ -246,8 +249,11 @@ end
 function get_dual_solutions(form::F, optimizer::MoiOptimizer) where {F <: Formulation}
     inner = getinner(optimizer)
     nb_dual_sols = MOI.get(inner, MOI.ResultCount())
+    @logmsg LogLevel(-3) "Nb of dual solutions: $nb_dual_sols"
+    @logmsg LogLevel(-3) "Termination status : $(MOI.get(inner, MOI.TerminationStatus()))."
     solutions = DualSolution{F}[]
     for res_idx in 1:nb_dual_sols
+        @logmsg LogLevel(-3) "Dual status of $res_idx is $(MOI.get(inner, MOI.DualStatus(res_idx)))"
         if MOI.get(inner, MOI.DualStatus(res_idx)) != MOI.FEASIBLE_POINT
             continue
         end
@@ -262,7 +268,7 @@ function get_dual_solutions(form::F, optimizer::MoiOptimizer) where {F <: Formul
             solcost += val * getcurrhs(form, id)
             val = round(val, digits = Coluna.TOL_DIGITS)
             if abs(val) > Coluna.TOL
-                @logmsg LogLevel(-4) string("Constr ", constr.name, " = ", val)
+                @logmsg LogLevel(-3) string("Constr ", constr.name, " = ", val)
                 push!(solconstrs, id)
                 push!(solvals, val)      
             end

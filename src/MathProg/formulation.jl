@@ -430,7 +430,7 @@ function enforce_integrality!(form::Formulation)
         getcurkind(form, varid) == Integ && continue
         getcurkind(form, varid) == Binary && continue
         if getduty(varid) <= MasterCol || getperenkind(form, varid) != Continuous
-            @logmsg LogLevel(-3) string("Setting kind of var ", getname(form, var), " to Integer")
+            @logmsg LogLevel(-5) string("Setting kind of var ", getname(form, var), " to Integer")
             setcurkind!(form, varid, Integ)
         end
     end
@@ -443,7 +443,7 @@ function relax_integrality!(form::Formulation) # TODO remove : should be in Algo
         !iscuractive(form, varid) && continue
         !isexplicit(form, varid) && continue
         getcurkind(form, var) == Continuous && continue
-        @logmsg LogLevel(-3) string("Setting kind of var ", getname(form, var), " to continuous")
+        @logmsg LogLevel(-5) string("Setting kind of var ", getname(form, var), " to continuous")
         setcurkind!(form, varid, Continuous)
     end
     return
@@ -463,23 +463,23 @@ function _setmembers!(form::Formulation, constr::Constraint, members::VarMembers
     # This adds the column to the convexity constraints automatically
     # since the setup variable is in the sp solution and it has a
     # a coefficient of 1.0 in the convexity constraints
-    @logmsg LogLevel(-2) string("Setting members of constraint ", getname(form, constr))
+    @logmsg LogLevel(-5) string("Setting members of constraint ", getname(form, constr))
     coef_matrix = getcoefmatrix(form)
     constrid = getid(constr)
-    @logmsg LogLevel(-4) "Members are : ", members
+    @logmsg LogLevel(-5) "Members are : ", members
 
     for (varid, var_coeff) in members
         # Add coef for its own variables
         var = getvar(form, varid)
         coef_matrix[constrid, varid] = var_coeff
-        @logmsg LogLevel(-4) string("Adding variable ", getname(form, var), " with coeff ", var_coeff)
+        @logmsg LogLevel(-5) string("Adding variable ", getname(form, var), " with coeff ", var_coeff)
 
         if getduty(varid) <= MasterRepPricingVar  || getduty(varid) <= MasterRepPricingSetupVar
             # then for all columns having its own variables
             assigned_form_uid = getassignedformuid(varid)
             spform = get_dw_pricing_sps(form.parent_formulation)[assigned_form_uid]
             for (col_id, col_coeff) in @view getprimalsolmatrix(spform)[varid,:]
-                @logmsg LogLevel(-4) string("Adding column ", getname(form, col_id), " with coeff ", col_coeff * var_coeff)
+                @logmsg LogLevel(-5) string("Adding column ", getname(form, col_id), " with coeff ", col_coeff * var_coeff)
                 coef_matrix[constrid, col_id] += col_coeff * var_coeff
             end
         end
