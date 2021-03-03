@@ -199,7 +199,7 @@ function run!(algo::StrongBranching, env::Env, data::ReformData, input::DivideIn
     optstate = getoptstate(parent)
 
     if isempty(algo.rules)
-        @logmsg LogLevel(0) "No branching rule is defined. No children will be generated."
+        println("No branching rule is defined. No children will be generated.")
         return DivideOutput(Vector{Node}(), optstate)
     end
 
@@ -281,7 +281,7 @@ function run!(algo::StrongBranching, env::Env, data::ReformData, input::DivideIn
     end
 
     if isempty(kept_branch_groups)
-        @logmsg LogLevel(0) "No branching candidates found. No children will be generated."
+        println("No branching candidates found. No children will be generated.")
         return DivideOutput(Vector{Node}(), optstate)
     end
 

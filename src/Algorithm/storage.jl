@@ -325,6 +325,8 @@ end
 #     setcurstate!(storagecont, statecont)
 # end
 
+# + storage states method from Data.
+
 function restore_states!(ssvector::StorageStatesVector, storages_to_restore::StoragesUsageDict)
     TO.@timeit Coluna._to "Restore/remove states" begin
         for (storagecont, stateid) in ssvector

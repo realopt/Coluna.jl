@@ -14,10 +14,10 @@ function _adjust_params(params, init_pb)
         else
             params.global_art_var_cost = 100000.0
             msg = """
-            No initial primal bound and no cost for global artificial variables.
+            Warning: No initial primal bound and no cost for global artificial variables.
             Cost of global artificial variables set to 100000.0
             """
-            @warn(msg)
+            println(msg)
         end
     end
     if params.local_art_var_cost === nothing
@@ -27,10 +27,10 @@ function _adjust_params(params, init_pb)
         else
             params.local_art_var_cost = 10000.0
             msg = """
-            No initial primal bound and no cost for local artificial variables.
+            Warning: No initial primal bound and no cost for local artificial variables.
             Cost of local artificial variables set to 10000.0
             """
-            @warn(msg)
+            println(msg)
         end
     end
     return
@@ -67,9 +67,9 @@ function optimize!(prob::MathProg.Problem, annotations::Annotations, params::Par
     println(_to)
     TO.reset_timer!(_to)
 
-    @logmsg LogLevel(0) "Terminated"
-    @logmsg LogLevel(0) string("Primal bound: ", get_ip_primal_bound(optstate))
-    @logmsg LogLevel(0) string("Dual bound: ", get_ip_dual_bound(optstate))
+    println("Terminated")
+    println(string("Primal bound: ", get_ip_primal_bound(optstate)))
+    println(string("Dual bound: ", get_ip_dual_bound(optstate)))
     return optstate, env.kpis
 end
 

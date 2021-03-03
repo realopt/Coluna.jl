@@ -55,7 +55,7 @@ function apply_conquer_alg_to_node!(
         @logmsg LogLevel(-1) string("Tree IP PB: ", get_ip_primal_bound(nodestate))
     end
     if ip_gap_closed(nodestate, rtol = opt_rtol, atol = opt_atol)
-        @info "IP Gap is closed: $(ip_gap(getincumbents(nodestate))). Abort treatment."
+        println("Info: IP Gap is closed: $(ip_gap(getincumbents(nodestate))). Abort treatment.")
     else
         isverbose(algo) && @logmsg LogLevel(-1) string("IP Gap is positive. Need to treat node.")
 
@@ -192,7 +192,7 @@ function run!(algo::ColCutGenConquer, env::Env, data::ReformData, input::Conquer
                 nb_tightening_rounds += 1
             end
         else
-            @warn "Skip cut generation because no best primal solution."
+            println("Warning : Skip cut generation because no best primal solution.")
             break
         end
 
@@ -224,7 +224,7 @@ function run!(algo::ColCutGenConquer, env::Env, data::ReformData, input::Conquer
             ) 
         node_pruned && break
 
-        @info "Running $name heuristic"
+        println("Info: Running $name heuristic")
         ismanager(heur_algorithm) && (stateids = store_states!(data))
         heur_output = run!(heur_algorithm, env, data, OptimizationInput(nodestate))
         ip_primal_sols = get_ip_primal_sols(getoptstate(heur_output))
