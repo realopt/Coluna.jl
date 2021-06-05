@@ -12,28 +12,19 @@ given by length(s). The custom cut used to cut the fractional solution is
                 sum(λ_s for s in sols if length(s) >= 2) <= 1.0
 where sols is the set of possible combinations of items in a bin.
 =#
-struct MyCustomVarData
+struct MyCustomVarData <: BD.AbstractCustomData
     nb_items::Int
 end
 
-struct MyCustomCutData
+struct MyCustomCutData <: BD.AbstractCustomData
     min_items::Int
 end
 
-function Coluna.MathProg.computecoeff(
+function ClMP.computecoeff(
     ::Variable, var_custom_data::MyCustomVarData,
     ::Constraint, constr_custom_data::MyCustomCutData
 )
     return (var_custom_data.nb_items >= constr_custom_data.min_items) ? 1.0 : 0.0
-end
-MathOptInterface.Utilities.map_indices(
-    variable_map::MathOptInterface.Utilities.IndexMap, x::MyCustomVarData
-) = x
-MathOptInterface.Utilities.map_indices(
-    variable_map::MathOptInterface.Utilities.IndexMap, x::MyCustomCutData
-) = x
-function MOI.submit(model::Model, cb::MOI.UserCut, con::ScalarConstraint, custom_data::MyCustomCutData)
-    return MOI.submit(JuMP.backend(model), cb, JuMP.moi_function(con.func), con.set, custom_data)
 end
 
 function custom_var_cuts_test()
@@ -76,8 +67,8 @@ function custom_var_cuts_test()
         custom_cut_is_added = false
 
         function my_pricing_callback(cbdata)
-            if !custom_var_is_added
-                Coluna.MathProg.addcustomvars!(cbdata.form.parent_formulation, MyCustomVarData)
+            if !custom_var_is_added # TODO: REMOVE
+                ClMP.addcustomvars!(cbdata.form.parent_formulation, MyCustomVarData)
                 custom_var_is_added = true
             end
 
@@ -89,9 +80,10 @@ function custom_var_cuts_test()
 
             # Get the dual values of the custom cuts
             custduals = Tuple{Int, Float64}[]
-            for (_, constr) in getconstrs(cbdata.form.parent_formulation)
+            form = cbdata.form.parent_formulation
+            for (_, constr) in getconstrs(form)
                 if typeof(constr.custom_data) == MyCustomCutData
-                    push!(custduals, (constr.custom_data.min_items, constr.curdata.inc_val))
+                    push!(custduals, (constr.custom_data.min_items, getcurincval(form, constr)))
                 end
             end
 
@@ -135,8 +127,8 @@ function custom_var_cuts_test()
         )
 
         function custom_cut_sep(cbdata)
-            if !custom_cut_is_added
-                Coluna.MathProg.addcustomconstrs!(cbdata.form, MyCustomCutData)
+            if !custom_cut_is_added # TODO: REMOVE
+                ClMP.addcustomconstrs!(cbdata.form, MyCustomCutData)
                 custom_cut_is_added = true
             end
 
@@ -154,8 +146,7 @@ function custom_var_cuts_test()
             # add the cut (at most one variable with 2 or more of the 3 items) if violated
             if viol > 0.001
                 MOI.submit(
-                    model, MOI.UserCut(cbdata),
-                    JuMP.ScalarConstraint(JuMP.AffExpr(0.0), MOI.LessThan(1.0)), MyCustomCutData(2)
+                    model, MOI.UserCut(cbdata), @build_constraint(0 <= 1), MyCustomCutData(2)
                 )
             end
             return

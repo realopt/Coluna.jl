@@ -153,6 +153,30 @@ end
 setcurrhs!(form::Formulation, constrid::ConstrId, rhs::Float64) = setcurrhs!(form, getconstr(form, constrid), rhs)
 
 
+# Constraint
+## incval
+"""
+    getcurincval(formulation, constraint)
+    getcurincval(formulation, constrid)
+
+Return the current incumbent value of a constraint in a formulation.
+"""
+getcurincval(form::Formulation, constrid::ConstrId) = getcurincval(form, getconstr(form, constrid))
+getcurincval(form::Formulation, constr::Constraint) = constr.curdata.inc_val
+
+"""
+    setcurincval!(formulation, constraint, inc_val::Float64)
+    setcurincval!(formulation, constrid, inc_val::Float64)
+
+Set the current incumbent value of a constraint in a formulation. 
+"""
+function setcurincval!(form::Formulation, constr::Constraint, inc_val::Float64) 
+    constr.curdata.inc_val = inc_val
+    return
+end
+setcurincval!(form::Formulation, constrid::ConstrId, inc_val::Float64) =
+    setcurincval!(form, getconstr(form, constrid), inc_val)
+
 # Variable & Constraints
 ## kind
 """
