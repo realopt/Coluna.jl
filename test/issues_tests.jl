@@ -306,38 +306,70 @@ function continuous_vars_in_sp()
     return
 end
 
+# Issue https://github.com/atoptima/Coluna.jl/issues/553
+function anonymous_constraint_model()
+    coluna = optimizer_with_attributes(
+        Coluna.Optimizer,
+        "params" => Coluna.Params(
+            solver = Coluna.Algorithm.TreeSearchAlgorithm()
+        ),
+        "default_optimizer" => GLPK.Optimizer
+    )
+    
+    model = BlockModel(coluna)
+    
+    @axis(S, 1:2)
+    
+    @variable(model, x[i in S], Bin)
+    t = @constraint(model, sum(x[i] for i in S) <= 1)
+    @objective(model, Min, -sum(x))
+    
+    @dantzig_wolfe_decomposition(model, decomposition, S)
+    
+    optimize!(model)
+
+    @show BlockDecomposition.annotation(model, t)
+    @test objectivevalue(model) ≈ -1
+end
+
 function test_issues_fixed()
-    @testset "no_decomposition" begin
-        solve_with_no_decomposition()
-    end
+    # @testset "no_decomposition" begin
+    #     solve_with_no_decomposition()
+    # end
 
-    @testset "moi_empty" begin
-        test_model_empty()
-    end
+    # @testset "moi_empty" begin
+    #     test_model_empty()
+    # end
 
-    @testset "decomposition_with_constant_in_objective" begin
-        decomposition_with_constant_in_objective()
-    end
+    # @testset "decomposition_with_constant_in_objective" begin
+    #     decomposition_with_constant_in_objective()
+    # end
 
-    @testset "solve_empty_model" begin
-        solve_empty_model()
-    end
+    # @testset "solve_empty_model" begin
+    #     solve_empty_model()
+    # end
     
-    @testset "optimize_twice" begin
-        optimize_twice()
-    end
+    # @testset "optimize_twice" begin
+    #     optimize_twice()
+    # end
 
-    @testset "column_generation_solver" begin
-        column_generation_solver()
-    end
+    # @testset "column_generation_solver" begin
+    #     column_generation_solver()
+    # end
     
-    @testset "branching_file_completion" begin
-        branching_file_completion()
-    end
+    # @testset "branching_file_completion" begin
+    #     branching_file_completion()
+    # end
 
-    @testset "continuous_vars_in_sp" begin
-        continuous_vars_in_sp()
+    # @testset "continuous_vars_in_sp" begin
+    #     continuous_vars_in_sp()
+    # end
+
+    @testset "anonymous_constraint_model" begin
+        anonymous_constraint_model()
+        exit()
     end
+    return
 end
 
 test_issues_fixed()

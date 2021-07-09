@@ -115,7 +115,18 @@ function ReducedCostsCalculationHelper(reform::Reformulation)
     )
 end
 
-function run!(algo::ColumnGeneration, env::Env, reform::Reformulation, input::OptimizationInput)::OptimizationOutput
+# Entry point of the column generation algorithm.
+# The column generation algorithm has three phases : 
+# - phase 1 : column generation with all variables have cost equal to 0 except artifical
+#   variables. The goal is to prove the problem is not infeasible.
+# - phase 2 : column generation without artificial variables (classic column generation).
+# - phase 3 : mix of phase 1 & phase 2. We try to prove the problem is not infeasible and 
+#   we hope that artificial variables have high enough costs to be set to zero during colgen.
+# The algorithm starts with phase 3. If the final solution has artifical variables,
+# it performs phase 1 and then phase 2.
+function run!(
+    algo::ColumnGeneration, env::Env, reform::Reformulation, input::OptimizationInput
+)::OptimizationOutput
     master = getmaster(reform)
     optstate = OptimizationState(master, getoptstate(input), false, false)
 
@@ -150,6 +161,7 @@ function should_do_ph_1(optstate::OptimizationState)
     return false
 end
 
+# Prepare master formulation for phase 1
 function set_ph1!(master::Formulation, optstate::OptimizationState)
     for (varid, var) in getvars(master)
         if !isanArtificialDuty(getduty(varid))
@@ -161,6 +173,7 @@ function set_ph1!(master::Formulation, optstate::OptimizationState)
     return
 end
 
+# Prepare master formulation for phase 2
 function set_ph2!(master::Formulation, optstate::OptimizationState)
     for (varid, var) in getvars(master)
         if isanArtificialDuty(getduty(varid))
@@ -175,6 +188,7 @@ function set_ph2!(master::Formulation, optstate::OptimizationState)
     return
 end
 
+# Prepare master formulation for phase 3
 function set_ph3!(master::Formulation)
     for (varid, var) in getvars(master)
         if isanArtificialDuty(getduty(varid))
@@ -183,11 +197,6 @@ function set_ph3!(master::Formulation)
             setcurcost!(master, varid, getperencost(master, var))
         end
     end
-    return
-end
-
-function update_pricing_target!(spform::Formulation)
-    # println("pricing target will only be needed after automating convexity constraints")
     return
 end
 
@@ -305,9 +314,6 @@ function solve_sp_to_gencol!(
     spinfo::SubprobInfo, algo::ColumnGeneration, env::Env, masterform::Formulation, 
     spform::Formulation, dualsol::DualSolution
 )
-    # Compute target
-    update_pricing_target!(spform)
-
     output = run!(algo.pricing_prob_solve_alg, env, spform, OptimizationInput(OptimizationState(spform)))
     sp_optstate = getoptstate(output)
     sp_sol_value = get_ip_primal_bound(sp_optstate)

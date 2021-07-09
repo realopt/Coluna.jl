@@ -431,7 +431,7 @@ function MOI.set(
 )
     constr = get(model.constrs, constrid, nothing)
     if constr !== nothing
-        store!(model.annotations, annotation, model.constrs[constrid])
+        store!(model.annotations, annotation, constr)
     end
     return
 end

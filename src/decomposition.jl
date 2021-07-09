@@ -92,10 +92,8 @@ function instantiate_orig_vars!(
     vars_per_ann = annotations.vars_per_ann
     for (ann, vars) in vars_per_ann
         formtype = BD.getformulation(ann)
-        dectype = BD.getdecomposition(ann)
         if formtype <: BD.Master
-            for (id, var) in vars
-                #duty, explicit = _varexpduty(DwMaster, formtype, dectype)
+            for (_, var) in vars
                 clonevar!(origform, masterform, masterform, var, MasterPureVar, is_explicit = true)
             end
         end
@@ -112,7 +110,7 @@ function instantiate_orig_constrs!(
 )
     !haskey(annotations.constrs_per_ann, mast_ann) && return
     constrs = annotations.constrs_per_ann[mast_ann]
-    for (id, constr) in constrs
+    for (_, constr) in constrs
         cloneconstr!(
             origform, masterform, masterform, constr, MasterMixedConstr, 
             loc_art_var_abs_cost = env.params.local_art_var_cost
