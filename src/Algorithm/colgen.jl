@@ -73,31 +73,21 @@ struct ReducedCostsCalculationHelper
     length::Int
     dwspvarids::Vector{VarId}
     perencosts::Vector{Float64}
-    dwspforms::Vector{Formulation}
-    dwsprep_coefmatrix::MathProg.ConstrVarMatrix
+    dwsprep_coefmatrix::DynamicSparseArrays.Transposed{MathProg.ConstrVarMatrix}
 end
 
 # Pre compute information to speed-up calculation of reduced costs of original variables
 # in the master of a given reformulation.
 function ReducedCostsCalculationHelper(reform::Reformulation)
     dwspvarids = VarId[]
-    dwspforms = Formulation[]
-
-    for (spid, spform) in get_dw_pricing_sps(reform)
-        for (varid, var) in getvars(spform)
-            if iscuractive(spform, varid) && getduty(varid) <= AbstractDwSpVar
-                push!(dwspvarids, varid)
-                push!(dwspforms, spform)
-            end
-        end
-    end
-
-    len = length(dwspvarids)
-    perencosts = zeros(Float64, len)
+    perencosts = Float64[]
 
     master = getmaster(reform)
-    for i in 1:len
-        perencosts[i] = getcurcost(master, dwspvarids[i])
+    for (varid, _) in getvars(master)
+        if iscuractive(master, varid) && getduty(varid) <= AbstractMasterRepDwSpVar
+            push!(dwspvarids, varid)
+            push!(perencosts, getcurcost(master, varid))
+        end
     end
 
     master_coefmatrix = getcoefmatrix(master)
@@ -111,7 +101,7 @@ function ReducedCostsCalculationHelper(reform::Reformulation)
     end
     closefillmode!(dwsprep_coefmatrix)
     return ReducedCostsCalculationHelper(
-        len, dwspvarids, perencosts, dwspforms, dwsprep_coefmatrix
+        length(dwspvarids), dwspvarids, perencosts, transpose(dwsprep_coefmatrix)
     )
 end
 
@@ -340,17 +330,33 @@ function solve_sp_to_gencol!(
     return
 end
 
-function updatereducedcosts!(
-    reform::Reformulation, redcostshelper::ReducedCostsCalculationHelper, dualsol::DualSolution
+function updatemodel!(
+    form::Formulation, repr_vars_red_costs::Dict{VarId, Float64}, ::DualSolution
 )
-    redcosts = deepcopy(redcostshelper.perencosts)
-
-    result = transpose(redcostshelper.dwsprep_coefmatrix) * getsol(dualsol)
-
-    for (i, varid) in enumerate(redcostshelper.dwspvarids)
-        setcurcost!(redcostshelper.dwspforms[i], varid, redcosts[i] - get(result, varid, 0.0))
+    for (varid, _) in getvars(form)
+        setcurcost!(form, varid, get(repr_vars_red_costs, varid, 0.0))
     end
-    return redcosts
+    return
+end
+
+function updatemodel!(
+    model::AbstractModel, ::Dict{VarId, Float64}, ::DualSolution
+)
+    error("updatemodel!() not defined for model of type $(typeof(model)).")
+end
+
+function updatereducedcosts!(
+    reform::Reformulation, redcostshelper::ReducedCostsCalculationHelper, masterdualsol::DualSolution
+)
+    redcosts = Dict{VarId,Float64}()
+    result = redcostshelper.dwsprep_coefmatrix * getsol(masterdualsol)
+    for (i, varid) in enumerate(redcostshelper.dwspvarids)
+        redcosts[varid] = redcostshelper.perencosts[i] - get(result, varid, 0.0)
+    end
+    for (_, spform) in get_dw_pricing_sps(reform)
+        updatemodel!(spform, redcosts, masterdualsol)
+    end
+    return
 end
 
 function solve_sps_to_gencols!(
